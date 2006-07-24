@@ -21,7 +21,7 @@
 //  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 //
 // --------------------------------------------------------------------------
-// $Maintainer: Timo Sachsenberg $
+// $Maintainer: Eva Lange $
 // --------------------------------------------------------------------------
 
 
@@ -55,12 +55,6 @@ namespace OpenMS
     float getFwhm();
     void setOptimization(bool opt);
     bool getOptimization();
-  protected:
-    bool optimization_;
-    float height_;
-    float height_ms2_;
-    float signal_to_noise_;
-    float fwhm_;
   protected slots:
     virtual void resetButton_clicked();
     virtual void startButton_clicked();
