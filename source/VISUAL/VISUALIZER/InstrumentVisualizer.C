@@ -39,70 +39,69 @@ using namespace std;
 
 namespace OpenMS
 {
-
-//Constructor
-InstrumentVisualizer::InstrumentVisualizer(bool editable, QWidget *parent) : BaseVisualizer(editable, parent)
-{
-	type_="Instrument";
-  
-	addLabel("Modify instrument information.");	
-	addSeperator();        
-	addLineEdit(instrument_name_, "Name" );
-	addLineEdit(instrument_vendor_, "Vendor" );	
-	addLineEdit(instrument_model_, "Model");
-	addTextEdit(instrument_customizations_, "Customizations" );
 	
-	finishAdding_();
-}
-
-
-
-void InstrumentVisualizer::load(Instrument &s)
-{
-        //Pointer to current object to keep track of the actual object
-	ptr_ = &s;
+	InstrumentVisualizer::InstrumentVisualizer(bool editable, QWidget *parent) : BaseVisualizer(editable, parent)
+	{
+		type_="Instrument";
+	  
+		addLabel("Modify instrument information.");	
+		addSeparator();        
+		addLineEdit(instrument_name_, "Name" );
+		addLineEdit(instrument_vendor_, "Vendor" );	
+		addLineEdit(instrument_model_, "Model");
+		addTextEdit(instrument_customizations_, "Customizations" );
+		
+		finishAdding_();
+	}
 	
-	//Copy of current object for restoring the original values
-	tempinstrument_=s;
-			
-  instrument_name_->setText(s.getName().c_str());
-	instrument_vendor_->setText(s.getVendor().c_str());
-	instrument_model_->setText(s.getModel().c_str());
-  instrument_customizations_->setText(s.getCustomizations().c_str()); 
+	
+	
+	void InstrumentVisualizer::load(Instrument &s)
+	{
+	        //Pointer to current object to keep track of the actual object
+		ptr_ = &s;
+		
+		//Copy of current object for restoring the original values
+		tempinstrument_=s;
 				
-}
-
-void InstrumentVisualizer::store_()
-{
-	try
+	  instrument_name_->setText(s.getName().c_str());
+		instrument_vendor_->setText(s.getVendor().c_str());
+		instrument_model_->setText(s.getModel().c_str());
+	  instrument_customizations_->setText(s.getCustomizations().c_str()); 
+					
+	}
+	
+	void InstrumentVisualizer::store_()
+	{
+		try
+		{
+			
+			ptr_->setName(instrument_name_->text().toStdString());
+			ptr_->setVendor(instrument_vendor_->text().toStdString());
+			ptr_->setModel(instrument_model_->text().toStdString());
+			ptr_->setCustomizations(instrument_customizations_->toPlainText().toStdString());
+			
+			tempinstrument_ = (*ptr_);		
+		}
+		catch(exception& e)
+		{
+			std::cout<<"Error while trying to store the new instrument data. "<<e.what()<<endl;
+		}
+		
+	}
+	
+	void InstrumentVisualizer::reject_()
 	{
 		
-		(*ptr_).setName(instrument_name_->text().toStdString());
-		(*ptr_).setVendor(instrument_vendor_->text().toStdString());
-		(*ptr_).setModel(instrument_model_->text().toStdString());
-		(*ptr_).setCustomizations(instrument_customizations_->toPlainText().toStdString());
+		try
+		{
+			load(tempinstrument_);
+		}
+		catch(exception e)
+		{
+			cout<<"Error while trying to restore original instrument data. "<<e.what()<<endl;
+		}
 		
-		tempinstrument_ = (*ptr_);		
 	}
-	catch(exception& e)
-	{
-		std::cout<<"Error while trying to store the new instrument data. "<<e.what()<<endl;
-	}
-	
-}
-
-void InstrumentVisualizer::reject_()
-{
-	
-	try
-	{
-		load(tempinstrument_);
-	}
-	catch(exception e)
-	{
-		cout<<"Error while trying to restore original instrument data. "<<e.what()<<endl;
-	}
-	
-}
 
 }
