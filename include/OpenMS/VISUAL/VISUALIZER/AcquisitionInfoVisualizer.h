@@ -30,6 +30,7 @@
 //OpenMS
 #include <OpenMS/METADATA/AcquisitionInfo.h>
 #include <OpenMS/VISUAL/VISUALIZER/BaseVisualizer.h>
+#include <OpenMS/VISUAL/VISUALIZER/BaseVisualizerGUI.h>
 
 //QT
 class QLabel;
@@ -43,31 +44,33 @@ namespace OpenMS
 		This class provides all functionality to view the meta information of an object of type AcquisitionInfo.
 	*/
 	class AcquisitionInfoVisualizer
-		: public BaseVisualizer
+		: public BaseVisualizerGUI,
+			public BaseVisualizer<AcquisitionInfo>
 	{
 		Q_OBJECT
 
-		public: 
-		   /// Default constructor
-			AcquisitionInfoVisualizer(bool editable = FALSE, QWidget *parent = 0);
-			/// Loads the meta data from the object to the viewer.
-			void load(AcquisitionInfo &h);
+		public:
+			
+		   ///Constructor
+			AcquisitionInfoVisualizer(bool editable = false, QWidget* parent = 0);
 	
-		private slots:
-		  /// Saves the changes made to the meta data into the object.
-			void store_();
-			/// Deletes all changes made in the viewer and restores the original meta data.
-			void reject_();
+		public slots:
+		  
+		  //Docu in base class
+			void store();
+		
+		protected slots:
+			
+			///Undo the changes made in the GUI.
+			void undo_();
 	
-		private:  
+		protected:  
 			
 			/// Edit field for the method 
-	   	QLineEdit *acquisitioninfo_method_;
-			
-			/// Pointer to current object	to keep track of the actual object.
-			AcquisitionInfo *ptr_;
-			/// Copy of current object for restoring the original values
-			AcquisitionInfo tempAcquisitionInfo_;
+	   	QLineEdit* acquisitioninfo_method_;
+	   	
+			//Docu in base class
+			void update_();
 	};
 
 }
