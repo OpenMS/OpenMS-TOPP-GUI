@@ -69,8 +69,6 @@ namespace OpenMS
 	    //@{
 	   	QComboBox* instrumentsettings_scan_mode_;
 			QComboBox* instrumentsettings_polarity_;
-			QLineEdit* instrumentsettings_mz_range_start_;
-			QLineEdit* instrumentsettings_mz_range_stop_;
 			//@}
 		
 			//Docu in base class
