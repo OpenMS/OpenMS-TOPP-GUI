@@ -36,9 +36,22 @@ namespace OpenMS
 		brush_color_ = Qt::lightGray;
 	}
 	
+	TOPPASOutputVertex::TOPPASOutputVertex(const TOPPASOutputVertex& rhs)
+		:	TOPPASVertex(rhs)
+	{
+		
+	}
+	
 	TOPPASOutputVertex::~TOPPASOutputVertex()
 	{
 	
+	}
+	
+	TOPPASOutputVertex& TOPPASOutputVertex::operator= (const TOPPASOutputVertex& rhs)
+	{
+		(TOPPASVertex)(*this) = rhs; // does it work that way?
+		
+		return *this;
 	}
 	
 	void TOPPASOutputVertex::moveNewEdgeTo_(const QPointF& /*pos*/)
