@@ -27,7 +27,9 @@
 
 // OpenMS includes
 #include <OpenMS/VISUAL/DIALOGS/TOPPASInputFileDialog.h>
+#include <OpenMS/SYSTEM/File.h>
 
+#include <QtGui/QMessageBox>
 #include <QtGui/QFileDialog>
 
 #include <iostream>
@@ -41,7 +43,7 @@ namespace OpenMS
 		line_edit->setText(file);
 		
 		connect (browse_button,SIGNAL(clicked()),this,SLOT(showFileDialog()));
-		connect (ok_button,SIGNAL(clicked()),this,SLOT(accept()));
+		connect (ok_button,SIGNAL(clicked()),this,SLOT(checkValidity_()));
 		connect (cancel_button,SIGNAL(clicked()),this,SLOT(reject()));
 	}
 	
@@ -59,6 +61,18 @@ namespace OpenMS
 	QString TOPPASInputFileDialog::getFilename()
 	{
 		return line_edit->text();
+	}
+	
+	void TOPPASInputFileDialog::checkValidity_()
+	{
+		//file exists?
+		if (!File::exists(line_edit->text()))
+		{
+			QMessageBox::warning(0,"Invalid file name","The specified file does not exist!");
+			return;
+		}
+		
+		accept();
 	}
 	
 } // namespace
