@@ -1,4 +1,4 @@
-// -*- Mode: C++; tab-width: 2; -*-
+// -*- mode: C++; tab-width: 2; -*-
 // vi: set ts=2:
 //
 // --------------------------------------------------------------------------
@@ -25,53 +25,47 @@
 // $Authors: Johannes Junker $
 // --------------------------------------------------------------------------
 
-
-#ifndef OPENMS_VISUAL_DIALOGS_TOPPASOUTPUTFILEDIALOG_H
-#define OPENMS_VISUAL_DIALOGS_TOPPASOUTPUTFILEDIALOG_H
+#ifndef OPENMS_VISUAL_TOPPASTREEVIEW_H
+#define OPENMS_VISUAL_TOPPASTREEVIEW_H
 
 #include <OpenMS/config.h>
-#include <OpenMS/VISUAL/DIALOGS/UIC/ui_TOPPASOutputFileDialog.h>
+
+//QT
+#include <QtGui/QTreeWidget>
+#include <QtGui/QMouseEvent>
+#include <QtCore/QPoint>
 
 namespace OpenMS 
 {
+	class String;
+
 	/**
-		@brief Dialog which allows to specify the output file name
+		@brief Tree view implementation for the list of TOPP tools
 		
-		@ingroup TOPPAS_elements
-		@ingroup Dialogs
+		@ingroup Visual
 	*/
-	class OPENMS_DLLAPI TOPPASOutputFileDialog
-		: public QDialog,
-			public Ui::TOPPASOutputFileDialogTemplate
+	class OPENMS_DLLAPI TOPPASTreeView
+		: public QTreeWidget
 	{
 		Q_OBJECT
-				
+		
 		public:
-			
 			/// Constructor
-			TOPPASOutputFileDialog(const QString& file_name);
-			
-			/// Returns the filename
-			QString getFilename();
-			
-			/// Returns if the file name is valid (is writable and not a directory)
-			static bool fileNameValid(const QString& file_name);
-			
-		public slots:
-		
-			/// Lets the user select the file via a file dialog
-			void showFileDialog();
-		
-		protected slots:
-		
-			/// Called when OK is pressed; checks if the selected file is valid
-			void checkValidity_();
-		
+			TOPPASTreeView(QWidget* parent = 0);
+			/// Destructor
+			~TOPPASTreeView();
+
 		protected:
-		
-			/// The parent
-			QObject* parent_;
+			///@name Reimplemented Qt events
+			//@{
+			void mousePressEvent(QMouseEvent* e);
+			void mouseMoveEvent(QMouseEvent* e);
+			//@}
+			
+			/// The drag start position
+			QPoint drag_start_pos_;
 	};
-	
+
 }
-#endif // OPENMS_VISUAL_DIALOGS_TOPPASOUTPUTFILESDIALOG_H
+#endif // OPENMS_VISUAL_TOPPASTREEVIEW_H
+
