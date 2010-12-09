@@ -31,13 +31,14 @@
 #include <OpenMS/METADATA/SpectrumSettings.h>
 #include <OpenMS/VISUAL/LayerData.h>
 #include <vector>
+#include <OpenMS/VISUAL/TOPPViewBehaviorInterface.h>
 
 namespace OpenMS
 {
   class TOPPViewBase;
 
   class TOPPViewIdentificationViewBehavior :
-      public QObject
+      public TOPPViewBehaviorInterface
   {
     Q_OBJECT
     ///@name Type definitions
@@ -66,13 +67,19 @@ namespace OpenMS
 
     public slots:
       /// Behavior for showSpectraumAs1D
-      void showSpectrumAs1D(int index);
+      virtual void showSpectrumAs1D(int index);
 
       /// Behavior for activate1DSpectrum
-      void activate1DSpectrum(int index);
+      virtual void activate1DSpectrum(int index);
 
       /// Behavior for deactivate1DSpectrum
-      void deactivate1DSpectrum(int index);
+      virtual void deactivate1DSpectrum(int index);
+
+      /// Slot for behavior activation
+      virtual void activateBehavior();
+
+      /// Slot for behavior deactivation
+      virtual void deactivateBehavior();
 
     private:
       /// Adds labels for the provided precursors to the 1D spectrum
