@@ -39,6 +39,10 @@
 #include <OpenMS/CONCEPT/LogStream.h>
 #include <OpenMS/VISUAL/APPLICATIONS/MISC/QApplicationTOPP.h>
 
+#include <OpenMS/CONCEPT/ProgressLogger.h>
+#include <OpenMS/VISUAL/GUIProgressLoggerImpl.h>
+#include <OpenMS/CONCEPT/Factory.h>
+
 //Qt
 #include <QtGui/QApplication>
 #include <QMessageBox>
@@ -50,6 +54,8 @@ namespace OpenMS
   QApplicationTOPP::QApplicationTOPP(int& argc, char** argv) :
     QApplication(argc, argv)
   {
+    //
+    Factory<ProgressLogger::ProgressLoggerImpl>::registerProduct(GUIProgressLoggerImpl::getProductName(), &GUIProgressLoggerImpl::create);
   }
 
   QApplicationTOPP::~QApplicationTOPP()
