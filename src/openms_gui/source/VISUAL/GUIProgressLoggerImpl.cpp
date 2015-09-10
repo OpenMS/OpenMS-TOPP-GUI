@@ -2,7 +2,7 @@
 //                   OpenMS -- Open-Source Mass Spectrometry
 // --------------------------------------------------------------------------
 // Copyright The OpenMS Team -- Eberhard Karls University Tuebingen,
-// ETH Zurich, and Freie Universitaet Berlin 2002-2013.
+// ETH Zurich, and Freie Universitaet Berlin 2002-2015.
 //
 // This software is released under a three-clause BSD license:
 //  * Redistributions of source code must retain the above copyright
@@ -28,63 +28,84 @@
 // ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 // --------------------------------------------------------------------------
-// $Maintainer: Timo Sachsenberg$
-// $Authors: Marc Sturm $
+// $Maintainer: Stephan Aiche $
+// $Authors: Stephan Aiche, Marc Sturm $
 // --------------------------------------------------------------------------
 
+#include <OpenMS/VISUAL/GUIProgressLoggerImpl.h>
 
-#ifndef OPENMS_VISUAL_DIALOGS_DBOPENDIALOG_H
-#define OPENMS_VISUAL_DIALOGS_DBOPENDIALOG_H
+#include <OpenMS/DATASTRUCTURES/String.h>
 
-#include <vector>
-#include <QtGui/QDialog>
-#include <OpenMS/CONCEPT/Types.h>
-
-class QLineEdit;
-class QTableWidget;
+#include <QProgressDialog>
+#include <iostream>
 
 namespace OpenMS
 {
-  class DBConnection;
-
-  /**
-      @brief Dialog that allow selecting a spectrum from a DB.
-
-      @ingroup Dialogs
-  */
-  class OPENMS_GUI_DLLAPI DBOpenDialog :
-    public QDialog
+  /// create new object (needed by Factory)
+  ProgressLogger::ProgressLoggerImpl* GUIProgressLoggerImpl::create()
   {
-    Q_OBJECT
-public:
-    /**
-        @brief Constructor
+    return new GUIProgressLoggerImpl();
+  }
 
-        The spectrum ids to load are inserted into the @p result vector.
+  /// name of the model (needed by Factory)
+  const String GUIProgressLoggerImpl::getProductName()
+  {
+    return "GUI";
+  }
 
-        An external DB connection is used by handing over @p connection.
-    */
-    DBOpenDialog(DBConnection & connection, std::vector<UInt> & result, QWidget * parent = 0);
-    /// Destructor
-    ~DBOpenDialog();
+  GUIProgressLoggerImpl::GUIProgressLoggerImpl() :
+    dlg_(0),
+    begin_(0),
+    end_(0)
+  {
+  }
 
-private slots:
-    /// Slot for accepting the selection
-    void ok();
-    /// Slot for refreshing the shown spectra
-    void loadSpectra();
+  void GUIProgressLoggerImpl::startProgress(const SignedSize begin, const SignedSize end, const String& label, const int /* current_recursion_depth */) const
+  {
+    begin_ = begin;
+    end_ = end;
+    if (!dlg_)
+    {
+      dlg_ = new QProgressDialog(label.c_str(), QString(), int(begin), int(end));
+    }
+    dlg_->setWindowTitle(label.c_str());
+    dlg_->setWindowModality(Qt::WindowModal);
+    dlg_->show();
+  }
 
-protected:
-    /// DB connection
-    DBConnection & connection_;
-    /// reference to the result vector
-    std::vector<UInt> & result_;
-    /// pointer to the search string lineedit
-    QLineEdit * search_string_;
-    /// pointer to the table for displaying the overview
-    QTableWidget * table_;
-  };
+  void GUIProgressLoggerImpl::setProgress(const SignedSize value, const int /* current_recursion_depth */) const
+  {
+    if (value < begin_ || value > end_)
+    {
+      std::cout << "ProgressLogger: Invalid progress value '" << value << "'. Should be between '" << begin_ << "' and '" << end_ << "'!" << std::endl;
+    }
+    else
+    {
+      if (dlg_)
+      {
+        dlg_->setValue((int)value);
+      }
+      else
+      {
+        std::cout << "ProgressLogger warning: 'setValue' called before 'startProgress'!" << std::endl;
+      }
+    }
+  }
 
-} //namespace
+  void GUIProgressLoggerImpl::endProgress(const int /* current_recursion_depth */) const
+  {
+    if (dlg_)
+    {
+      dlg_->setValue((int)end_);
+    }
+    else
+    {
+      std::cout << "ProgressLogger warning: 'endProgress' called before 'startProgress'!" << std::endl;
+    }
+  }
 
-#endif //OPENMS_VISUAL_DIALOGS_DBOPENDIALOG_H
+  GUIProgressLoggerImpl::~GUIProgressLoggerImpl()
+  {
+    delete dlg_;
+  }
+}
