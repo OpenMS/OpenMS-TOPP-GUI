@@ -49,7 +49,8 @@ namespace OpenMS
 {
   namespace Internal
   {
-    ///Preferences dialog for Spectrum3DWidget
+    /// A QLineEdit + Browse button to have the user select a local python installation
+    /// By default, 'python' is used
     class OPENMS_GUI_DLLAPI PythonSelector : public QWidget
     {
       Q_OBJECT
