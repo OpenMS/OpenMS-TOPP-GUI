@@ -36,7 +36,7 @@
 #include <ui_SwathTabWidget.h>
 
 #include <OpenMS/VISUAL/DIALOGS/PythonModuleRequirement.h>
-
+#include <OpenMS/VISUAL/DIALOGS/TOPPASInputFilesDialog.h>
 
 using namespace std;
 
@@ -49,9 +49,10 @@ namespace OpenMS
         ui(new Ui::SwathTabWidget)
     {
         ui->setupUi(this);
-        auto py_selector = ui->config->findChild<PythonSelector*>("py_selector", Qt::FindDirectChildrenOnly);
+        
+        auto py_selector = (PythonSelector*)ui->py_selector;
 
-        auto py_pyprophet = ui->config->findChild<PythonModuleRequirement*>("py_pyprophet", Qt::FindDirectChildrenOnly);
+        auto py_pyprophet = (PythonModuleRequirement*)ui->py_pyprophet;
         py_pyprophet->setRequiredModules({"pyprophet", "stats"});
         py_pyprophet->setFreeText("In order to run PyProphet after OpenSWATH, the above modules need to be installed\n" \
                                   "Once they are available, the 'pyProphet' tab will become active and configurable.");
@@ -68,5 +69,12 @@ namespace OpenMS
         delete ui;
     }
 
+    void SwathTabWidget::on_pushButton_clicked()
+    {
+        TOPPASInputFilesDialog tifd({}, "", 0);
+        tifd.exec();
+    }
   }   //namespace Internal
 } //namspace OpenMS
+
+
