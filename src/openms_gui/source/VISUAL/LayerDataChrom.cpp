@@ -40,7 +40,7 @@ namespace OpenMS
 {
   
   namespace { // internal linkage -- just to test instanciability
-    LayerDataChrom l_chrom;
+    LayerDataChrom l_data;
   }
   
 
