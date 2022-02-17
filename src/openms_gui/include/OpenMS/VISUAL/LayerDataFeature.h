@@ -59,6 +59,8 @@ namespace OpenMS
     /// move assignment
     LayerDataFeature& operator=(LayerDataFeature&& ld) = default;
 
+    std::unique_ptr<Painter1DBase> getPainter1D() const override;
+    
     void updateRanges() override
     {
       features_->updateRanges();
