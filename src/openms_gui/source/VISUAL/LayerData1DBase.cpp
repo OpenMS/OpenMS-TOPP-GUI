@@ -41,7 +41,6 @@ using namespace std;
 
 namespace OpenMS
 {
-
   String LayerData1DBase::getDecoratedName() const
   {
     String n = LayerDataBase::getDecoratedName();
