@@ -44,7 +44,7 @@ namespace OpenMS
 
   @ingroup PlotWidgets
   */
-  class OPENMS_GUI_DLLAPI LayerDataChrom : public LayerDataBase
+  class OPENMS_GUI_DLLAPI LayerDataChrom : public virtual LayerDataBase
   {
 public:
     /// Default constructor
@@ -59,22 +59,31 @@ public:
     /// move assignment
     LayerDataChrom& operator=(LayerDataChrom&& ld) = default;
 
+
+    std::unique_ptr<LayerStoreData> storeVisibleData(const RangeAllType& visible_range, const DataFilters& layer_filters) const override;
+    std::unique_ptr<LayerStoreData> storeFullData() const override;
+    ProjectionData getProjection(const DIM_UNIT unit_x, const DIM_UNIT unit_y, const RangeAllType& area) const override;
+
     void updateRanges() override
     {
-      peak_map_->updateRanges();
-      // on_disc_peaks->updateRanges(); // note: this is not going to work since its on disk! We currently don't have a good way to access these ranges
       chromatogram_map_->updateRanges();
     }
 
     RangeAllType getRange() const override
     {
       RangeAllType r;
-      r.assign(*getPeakData());
+      r.assign(*chromatogram_map_);
       return r;
     }
 
     std::unique_ptr<LayerStatistics> getStats() const override;
 
+    PointXYType peakIndexToXY(const PeakIndex& peak, const DimMapper<2>& mapper) const override;
+
+    const ExperimentType::ChromatogramType getChromatogram(Size idx) const
+    {
+      return chromatogram_map_->getChromatogram(idx);
+    }
   };
 
 } //namespace
