@@ -21,21 +21,12 @@ namespace OpenMS
       @ingroup TOPPAS_elements
   */
   class OPENMS_GUI_DLLAPI TOPPASOutputFileListVertex :
-    public TOPPASVertex
+    public TOPPASOutputVertex
   {
     Q_OBJECT
 
 public:
-
-    /// Default constructor
-    TOPPASOutputFileListVertex() = default;
-    /// Copy constructor
-    TOPPASOutputFileListVertex(const TOPPASOutputFileListVertex & rhs);
-    /// Destructor
-    ~TOPPASOutputFileListVertex() override = default;
-    /// Assignment operator
-    TOPPASOutputFileListVertex & operator=(const TOPPASOutputFileListVertex & rhs);
-    /// returns "OutputVertex"
+    /// returns "OutputFileVertex"
     String getName() const override;
     // documented in base class
     void paint(QPainter * painter, const QStyleOptionGraphicsItem * option, QWidget * widget) override;
@@ -66,21 +57,6 @@ public:
 public slots:
     //documented in base class
     void inEdgeHasChanged() override;
-
-signals:
-    /// Emitted when an output file was written
-    void outputFileWritten(const String& file);
-
-    /// Emitted when user has changed the output folder name (i.e. output dir needs to be newly created and packages updates)
-    void outputFolderNameChanged();
-
-protected:
-    /// custom output folder name
-    QString output_folder_name_;
-
-    // convenience members, not required for operation, but for progress during copying
-    int files_written_ = 0;   ///< files that were already written
-    int files_total_ = 0;     ///< total number of files from upstream
   };
 }
 
