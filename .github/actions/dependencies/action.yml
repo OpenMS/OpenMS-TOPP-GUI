@@ -60,7 +60,9 @@ runs:
 
         if [[ "$COMPILER" == clang* ]]; then
           major_ver=$(clang -dumpversion | cut -d. -f1)
-          sudo apt-get -qq install -y "llvm-${major_ver}"
+          # libomp: the OpenMS package requires OpenMP of its consumers (OpenMP::OpenMP_CXX is
+          # PUBLIC), and clang finds it only with LLVM's runtime
+          sudo apt-get -qq install -y "libomp-${major_ver}-dev" "llvm-${major_ver}"
           for tool in /usr/bin/llvm-*-"${major_ver}"; do
             base=$(basename "$tool" "-${major_ver}")
             sudo ln -sf "$tool" "/usr/local/bin/${base}"
