@@ -4,6 +4,29 @@
 	<welcome file="@CPACK_RESOURCE_FILE_WELCOME_NOPATH@"/>
 	<readme file="@CPACK_RESOURCE_FILE_README_NOPATH@"/>
 	<license file="@CPACK_RESOURCE_FILE_LICENSE_NOPATH@"/>
-	@CPACK_OPENMS_ALLOWED_OS_VERSIONS@
+	<volume-check script="openms_core_installed()">
+		@CPACK_OPENMS_ALLOWED_OS_VERSIONS@
+	</volume-check>
+	<script><![CDATA[
+// The OpenMS GUI is installed into the folder of the OpenMS package of the same version;
+// a volume qualifies only if that package is installed on it.
+function openms_core_installed()
+{
+	var root = my.target.mountpoint;
+	if (root.charAt(root.length - 1) != '/')
+	{
+		root = root + '/';
+	}
+	var library = root + '@CPACK_OPENMS_CORE_LIBRARY@';
+	if (system.files.fileExistsAtPath(library))
+	{
+		return true;
+	}
+	my.result.type = 'Fatal';
+	my.result.title = 'OpenMS @CPACK_OPENMS_VERSION@ is not installed';
+	my.result.message = 'The OpenMS GUI is an add-on to OpenMS @CPACK_OPENMS_VERSION@, which is not installed on this volume (' + library + ' does not exist). Install the OpenMS @CPACK_OPENMS_VERSION@ package for all users first, then run this installer again.';
+	return false;
+}
+	]]></script>
 @CPACK_APPLE_PKG_INSTALLER_CONTENT@
 </installer-gui-script>

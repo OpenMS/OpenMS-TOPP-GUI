@@ -2,13 +2,14 @@
 # macOS notarization script using notarytool (requires Xcode 13+ / macOS 11.3+)
 # altool was deprecated and unsupported after Fall 2023.
 #
-# Usage: notarize.sh <bundle_pkg> <bundle_id> <apple_id> <password_env_var> [log_folder]
+# Usage: notarize.sh <bundle_pkg> <bundle_id> <apple_id> <password_env_var> <team_id> [log_folder]
 #
 # Arguments:
 #   bundle_pkg       - The package to notarize (.dmg, .pkg, .zip, or .app)
-#   bundle_id        - The bundle identifier (e.g., de.openms)
+#   bundle_id        - The bundle identifier (e.g., de.openms.gui)
 #   apple_id         - Apple ID email for notarization
 #   password_env_var - Environment variable name containing app-specific password
+#   team_id          - The Apple Developer Team ID (e.g., C64UCGJ5PL)
 #   log_folder       - Optional: folder for log files (defaults to current directory)
 
 # Exit on error and fail on any error in a pipeline
@@ -37,9 +38,9 @@ echo "Apple ID: $ASC_USERNAME"
 echo "Log folder: $LOG_FOLDER"
 
 # Validate inputs
-if [[ -z "$BUNDLE_PKG" ]] || [[ -z "$BUNDLE_ID" ]] || [[ -z "$ASC_USERNAME" ]] || [[ -z "$ASC_PASSWORD_ENVVAR" ]]; then
+if [[ -z "$BUNDLE_PKG" ]] || [[ -z "$BUNDLE_ID" ]] || [[ -z "$ASC_USERNAME" ]] || [[ -z "$ASC_PASSWORD_ENVVAR" ]] || [[ -z "$ASC_TEAMID" ]]; then
     echo "Error: Missing required arguments"
-    echo "Usage: $0 <bundle_pkg> <bundle_id> <apple_id> <password_env_var> [log_folder]"
+    echo "Usage: $0 <bundle_pkg> <bundle_id> <apple_id> <password_env_var> <team_id> [log_folder]"
     exit 1
 fi
 

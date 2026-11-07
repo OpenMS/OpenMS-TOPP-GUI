@@ -1,19 +1,20 @@
 # Copyright (c) 2002-present, OpenMS Inc. -- EKU Tuebingen, ETH Zurich, and FU Berlin
 # SPDX-License-Identifier: BSD-3-Clause
-# 
+#
 # --------------------------------------------------------------------------
 # $Maintainer: Julianus Pfeuffer $
 # $Authors: Stephan Aiche, Julianus Pfeuffer $
 # --------------------------------------------------------------------------
 
-
-# custom code to add a mac bundle application
-
 # --------------------------------------------------------------------------
-# adds a bundle with the given name
-# @param _name Name of the bundle to add
-# Note that this macro will also take care of installing the bundle in the
-# case that a dmg package should be build
+# add_mac_app_bundle(<name>)
+# Adds the GUI application <name> as a macOS app bundle and installs it.
+#
+# In the macOS package (PACKAGE_TYPE pkg) the bundle goes into the root of the OpenMS
+# folder, next to its lib/ and bin/. It is not self-contained: it loads the OpenMS
+# libraries and Qt from lib/ and the Qt plugins from lib/plugins (its qt.conf points
+# there; the plugins are installed by src/openms_gui/CMakeLists.txt). A plain installation
+# puts the bundle into ${INSTALL_BIN_DIR}.
 macro(add_mac_app_bundle _name)
 	# the icon file
 	set(ICON_FILE_PATH      "${PROJECT_SOURCE_DIR}/source/VISUAL/APPLICATIONS/GUITOOLS/${_name}-resources/${_name}.icns")
@@ -29,22 +30,19 @@ macro(add_mac_app_bundle _name)
 		set(OPENMS_BUNDLE_MINIMUM_SYSTEM_VERSION "12.0")
 	endif()
 
-	## TODO do we need a different RPATH for apps? Doesnt CMAKE do that automatically
-	# we also need the icns in the app
 	add_executable(
 		${_name}
 		MACOSX_BUNDLE
 		${GUI_DIR}/${_name}.cpp
 		${ICON_FILE_PATH})
-	
-	## packaged bundles live in the root of the package (next to lib/), plain installs put them into ${INSTALL_BIN_DIR}
-	if("${PACKAGE_TYPE}" STREQUAL "dmg" OR "${PACKAGE_TYPE}" STREQUAL "pkg")
-		set(_bundle_lib_rpath "@executable_path/../../../lib")
+
+	## <bundle>/Contents/MacOS/<name>: three levels up is the folder that holds the bundle
+	if("${PACKAGE_TYPE}" STREQUAL "pkg")
+		set(_bundle_lib_rpath "@executable_path/../../../${INSTALL_LIB_DIR}")
 	else()
 		set(_bundle_lib_rpath "@executable_path/../../../${INSTALL_LIB_PATH_REL_TO_BIN}")
 	endif()
-	set_target_properties(${_name}
-												PROPERTIES INSTALL_RPATH "@executable_path/../Frameworks;${_bundle_lib_rpath}")
+	set_target_properties(${_name} PROPERTIES INSTALL_RPATH "${_bundle_lib_rpath}")
 
 	string(TIMESTAMP MY_YEAR "%Y")
 
@@ -63,114 +61,38 @@ macro(add_mac_app_bundle _name)
 
 	set_source_files_properties(${ICON_FILE_PATH} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 
-	## If you are packaging: Create ".app" bundles.
-	## If you are not packaging, libraries are linked via hardcoded paths specific to your machine.
-	if("${PACKAGE_TYPE}" STREQUAL "dmg" OR "${PACKAGE_TYPE}" STREQUAL "pkg")
-		
-		# For dmg we need to fixup BEFORE installing (inside the build dir), because installing with CMake
-		# (to the temp folder used for packaging) will remove
-		# absolute load paths, required for finding dependencies by fixup_bundle. Maybe it can be done with the
-		# correct CMake RPATH settings (see root CMakeLists.txt) but it is very tricky.
-		
-		# TODO Use CMake's RUNTIME_DEPENDENCY_SET option in install commands (see PKG if-cases) to collect required
-		#  libs, install them into the bundle and only fix their loading
-		if("${PACKAGE_TYPE}" STREQUAL "dmg")
-			set (APP_FOLDER "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${_name}.app")
-			## Install Qt6 plugins needed on mac and save them in a var for fixing their dependencies later
-			set (PLUGIN_VAR_NAME QT_PLUGINS_APPS_${_name})
-			install_qt6_plugin_builddir("Qt6::QCocoaIntegrationPlugin" ${PLUGIN_VAR_NAME} "${APP_FOLDER}/Contents/PlugIns" ${OPENMS_GUI_APPLICATIONS_COMPONENT})
-			install_qt6_plugin_builddir("Qt6::QMacStylePlugin" ${PLUGIN_VAR_NAME} "${APP_FOLDER}/Contents/PlugIns" ${OPENMS_GUI_APPLICATIONS_COMPONENT})
-			
-			set (QT_PLUGINS_TO_FIX ${${PLUGIN_VAR_NAME}})
-			## Find Qt library folder
-			get_target_property(QT_LIBRARY_DIR Qt6::Core LOCATION)
-			get_filename_component(QT_LIBRARY_DIR ${QT_LIBRARY_DIR} PATH)
-			get_filename_component(QT_LIBRARY_DIR "${QT_LIBRARY_DIR}/.." ABSOLUTE)
-			## Fix up the dependencies in the bundle and make them rel. to their location in the bundle
-			## Give additional plugins to fix and extra dirs where dependencies should be searched
-			install(CODE "
-					set(BU_CHMOD_BUNDLE_ITEMS On)
-					include(BundleUtilities)
-					fixup_bundle(${APP_FOLDER} \"${QT_PLUGINS_TO_FIX}\" \"${QT_LIBRARY_DIR}\")
-					"
-					COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
-		endif()
-		
-		
-		## Copy bundle to the target install destination. Not to bin folder but root of package/dmg.
+	if("${PACKAGE_TYPE}" STREQUAL "pkg")
+		## into the root of the OpenMS folder
 		install(TARGETS ${_name} BUNDLE
 						DESTINATION .
 						COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
 		## Listed in the component plist of the pkg (cmake/generate_applications_component_plist.cmake)
 		set_property(GLOBAL APPEND PROPERTY OPENMS_APP_BUNDLES ${_name})
-		
-		if("${PACKAGE_TYPE}" STREQUAL "pkg")
-			## Write a qt.conf file with a ref to the plugin dir outside of the bundle (to share)
-			file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/macappqt.conf"
-					 "[Paths]\nPlugins = ../../${INSTALL_PLUGIN_DIR}\n")
-			install(FILES "${CMAKE_CURRENT_BINARY_DIR}/macappqt.conf"
-							DESTINATION "${_name}.app/Contents/Resources/"
-							RENAME "qt.conf"
-							COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
-      # Get the actual plugin files, resolving symlinks
-      get_target_property(_cocoa_plugin_path "Qt6::QCocoaIntegrationPlugin" LOCATION)
-      get_filename_component(_cocoa_plugin_path "${_cocoa_plugin_path}" REALPATH)
-      install(FILES "${_cocoa_plugin_path}"
-              DESTINATION "${INSTALL_PLUGIN_DIR}/platforms"
-              COMPONENT Dependencies)
-      
-      get_target_property(_macstyle_plugin_path "Qt6::QMacStylePlugin" LOCATION)
-      get_filename_component(_macstyle_plugin_path "${_macstyle_plugin_path}" REALPATH)
-      install(FILES "${_macstyle_plugin_path}"
-              DESTINATION "${INSTALL_PLUGIN_DIR}/styles"
-              COMPONENT Dependencies)
-			# Instead of softlinking, it is recommended by Apple to use RPATHs
-      #install(CODE "execute_process(COMMAND ln -fs ../../${INSTALL_LIB_DIR} \${CMAKE_INSTALL_PREFIX}/${_name}.app/Contents/Frameworks)"
-			#				COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
-      #install(CODE "execute_process(COMMAND ln -fs ../../${INSTALL_PLUGIN_DIR} \${CMAKE_INSTALL_PREFIX}/${_name}.app/Contents/PlugIns)"
-	  		  # 			COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
-			install(CODE "execute_process(COMMAND ${OPENMS_HOST_DIRECTORY}/cmake/MacOSX/fix_dependencies.rb -b \${CMAKE_INSTALL_PREFIX}/${_name}.app/Contents/MacOS/ -e @rpath/ -n -c)"
-							COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
-    else() # dmg
-    		## Write a qt.conf file with a ref to the plugin dir in app bundles = PlugIns
-				file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/macappqt.conf"
-						 "[Paths]\nPlugins = PlugIns\n")
-				install(FILES "${CMAKE_CURRENT_BINARY_DIR}/macappqt.conf"
-								DESTINATION "${_name}.app/Contents/Resources/"
-								RENAME "qt.conf"
-								COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
-		endif()
 
-		
-		## Notarization is only possible with Xcode/Appleclang 10, otherwise we just skip
-		if(NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 10 AND ("${PACKAGE_TYPE}" STREQUAL "dmg" OR "${PACKAGE_TYPE}" STREQUAL "pkg"))
-			## We also need an identity to sign with
-			if(DEFINED CPACK_BUNDLE_APPLE_CERT_APP)
-				## TODO try to find codesign to make sure the right exec is used (currently needs to be in path)
-				## TODO allow choosing keychain
-				## Note: Signing identity has to be unique, and present in any of the keychains in search list
-				## which needs to be unlocked. Play around with keychain argument otherwise.
-				 install(CODE "
-execute_process(COMMAND codesign --deep --force --options runtime --sign \"${CPACK_BUNDLE_APPLE_CERT_APP}\" -i de.openms.${_name} \${CMAKE_INSTALL_PREFIX}/${_name}.app OUTPUT_VARIABLE sign_out ERROR_VARIABLE sign_out)
-message('\${sign_out}')" COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
+		## The Qt plugins in lib/plugins, relative to <bundle>/Contents
+		file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/macappqt.conf"
+				 "[Paths]\nPlugins = ../../${INSTALL_PLUGIN_DIR}\n")
+		install(FILES "${CMAKE_CURRENT_BINARY_DIR}/macappqt.conf"
+						DESTINATION "${_name}.app/Contents/Resources/"
+						RENAME "qt.conf"
+						COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
 
-				 install(CODE "
+		## Load Qt through @rpath, i.e. from lib/ (the runtime dependency set of
+		## cmake/package_general.cmake has put it there); then sign the bundle, which the fix-up
+		## would invalidate afterwards.
+		install(CODE "execute_process(COMMAND ${OPENMS_HOST_DIRECTORY}/cmake/MacOSX/fix_dependencies.rb -b \${CMAKE_INSTALL_PREFIX}/${_name}.app/Contents/MacOS/ -e @rpath/ -n -c)"
+						COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
+		## The identity is CPACK_BUNDLE_APPLE_CERT_APP (the top-level CMakeLists.txt; '-' signs ad hoc).
+		## It has to be unique and present in an unlocked keychain of the search list.
+		install(CODE "
+execute_process(COMMAND codesign --deep --force --options runtime --timestamp --sign \"${CPACK_BUNDLE_APPLE_CERT_APP}\" -i de.openms.${_name} \${CMAKE_INSTALL_PREFIX}/${_name}.app OUTPUT_VARIABLE sign_out ERROR_VARIABLE sign_out)
+message(STATUS \"\${sign_out}\")
 execute_process(COMMAND codesign -dv \${CMAKE_INSTALL_PREFIX}/${_name}.app OUTPUT_VARIABLE sign_check_out ERROR_VARIABLE sign_check_out)
-message('\${sign_check_out}')" COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
-
-				if("${PACKAGE_TYPE}" STREQUAL "dmg")
-				 install(CODE "
-execute_process(COMMAND ${OPENMS_HOST_DIRECTORY}/cmake/MacOSX/notarize.sh \${CMAKE_INSTALL_PREFIX}/${_name}.app de.openms.${_name} ${SIGNING_EMAIL} APPLE_APP_SPECIFIC_NOTARIZATION_PASSWORD ${OPENMS_HOST_BINARY_DIRECTORY} OUTPUT_VARIABLE notarize_out ERROR_VARIABLE notarize_out)
-message('\${notarize_out}')" COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
-
-				 install(CODE "
-execute_process(COMMAND spctl -a -v \${CMAKE_INSTALL_PREFIX}/${_name}.app OUTPUT_VARIABLE verify_out ERROR_VARIABLE verify_out)
-message('\${verify_out}')" COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
-   			endif()
-			endif(DEFINED CPACK_BUNDLE_APPLE_CERT_APP)
-		endif()
+message(STATUS \"\${sign_check_out}\")" COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
 	else()
-	  ## Just install to the usual bin dir without fixing it up
+		## A plain installation: the bundle finds the libraries through its install RPATH. A
+		## runtime dependency set takes at most one bundle executable, hence one per bundle
+		## (nothing installs them).
 		install(TARGETS ${_name} RUNTIME_DEPENDENCY_SET ${_name}_DEPS
 						RUNTIME DESTINATION ${INSTALL_BIN_DIR} COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT}
 						BUNDLE DESTINATION ${INSTALL_BIN_DIR} COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT}

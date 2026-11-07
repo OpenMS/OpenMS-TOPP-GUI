@@ -9,17 +9,9 @@
 #------------------------------------------------------------------------------
 # Single source of truth for the minimum supported compiler versions.
 #
-# The values below are consumed in two places, so they only ever need to be
-# edited here:
-#   1. the checks at the bottom of this file, which abort configuration with a
-#      readable message on an unsupported compiler
-#   2. doc/doxygen/Doxyfile.in, which turns them into doxygen ALIASES
-#      (@minMSVC, @minGCC, ...) so that the install documentation quotes these
-#      exact numbers instead of hardcoding its own copy
-#
-# Note that the Windows check is additionally duplicated -- deliberately and
-# with a pointer back here -- as an early guard in the top-level CMakeLists.txt
-# ahead of project(). See the comment there for why.
+# The same minimums as the OpenMS core (cmake/min_compiler_versions.cmake there):
+# the GUI layer is compiled against the core's headers. The checks at the bottom
+# abort configuration with a readable message on an unsupported compiler.
 #------------------------------------------------------------------------------
 
 # --- MSVC ---------------------------------------------------------------------

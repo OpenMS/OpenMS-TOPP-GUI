@@ -1,18 +1,11 @@
-### Installing TOPP into your local shell ###
-
-To use TOPP tools as regular applications in your own shell just add the following lines to your ~/.profile file. 
-(Adapt the first line to point to the folder where you put OpenMS, e.g.: /Applications/OpenMS-3.0.0)
-
-```shell
-export OPENMS_TOPP_PATH=<OpenMS-PATH>
-source $OPENMS_TOPP_PATH/.TOPP_bash_profile
-```
-
----
-
 ## macOS Code Signing and Notarization
 
-OpenMS packages for macOS are code signed and notarized to ensure users can run them without security warnings from Gatekeeper.
+The macOS package of the OpenMS GUI is code signed and notarized to ensure users can run it without security warnings from Gatekeeper.
+
+The GUI package installs into the folder of the OpenMS core package of the same version, and its
+applications load the libraries of the core. With the hardened runtime, macOS loads only libraries
+signed by the same team, so both packages have to be signed with the certificates of the same team
+(OpenMS Inc., `C64UCGJ5PL`).
 
 ### Prerequisites
 
@@ -76,7 +69,7 @@ For notarization, create an app-specific password:
 
 1. Go to https://appleid.apple.com
 2. Sign in → Security → App-Specific Passwords → Generate
-3. Use this password for `APPLE_NOTARIZATION_PASSWORD`
+3. Use this password for `APPLE_APP_SPECIFIC_NOTARIZATION_PASSWORD`
 
 ### Local Testing
 
@@ -91,7 +84,7 @@ codesign -dv --verbose=4 /path/to/binary
 
 # Notarize a package (requires CODESIGNPW environment variable)
 export CODESIGNPW="your-app-specific-password"
-./cmake/MacOSX/notarize.sh package.pkg de.openms your@email.com CODESIGNPW .
+./cmake/MacOSX/notarize.sh package.pkg de.openms.gui your@email.com CODESIGNPW TEAMID .
 
 # Verify notarization
 spctl -a -vvv -t install package.pkg
@@ -113,6 +106,7 @@ spctl -a -vvv -t install package.pkg
 
 ### Files in this Directory
 
-- `notarize.sh` - Script for notarizing packages (.pkg, .dmg, .zip) using notarytool
-- `sign_bins_and_libs.rb` - Ruby script to sign all binaries in a directory
-- `fix_dependencies.rb` - Script to fix library paths for distribution
+- `notarize.sh` - Script for notarizing packages (.pkg, .dmg, .zip) using notarytool:
+  `notarize.sh <package> <bundle_id> <apple_id> <password_env_var> <team_id> [log_folder]`
+- `fix_dependencies.rb` - Script to fix library paths for distribution (cmake/package_mac_productbuild.cmake)
+- `openms_logo_corner_small.png` - Background of the installer

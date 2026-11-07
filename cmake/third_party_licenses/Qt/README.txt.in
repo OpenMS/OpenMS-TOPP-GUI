@@ -1,6 +1,6 @@
 The Qt @QT_LICENSE_VERSION@ libraries and plugins in this package (the modules Core, Gui,
-Widgets, Svg and the others OpenMS needs) are Copyright (C) The Qt Company Ltd. and
-other contributors. OpenMS uses them under the GNU Lesser General Public License,
+Widgets, Svg and the others the OpenMS GUI needs) are Copyright (C) The Qt Company Ltd. and
+other contributors. The OpenMS GUI uses them under the GNU Lesser General Public License,
 version 3 (LGPL-3.0-only.txt in this directory), which supplements the GNU General
 Public License, version 3 (GPL-3.0-only.txt in this directory).
 

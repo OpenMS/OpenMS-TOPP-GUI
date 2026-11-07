@@ -17,13 +17,13 @@
 # workflow does: it builds and tests with PACKAGE_TYPE=none, then reconfigures with
 # the package type and runs cpack without relinking. CMake pads a build-tree RPATH
 # with ':' to the length of the install RPATH, and the install RPATH of
-# PACKAGE_TYPE=none also names the vcpkg directory of the build tree (top-level
-# CMakeLists.txt), so it is far longer than that of a package. When installing,
-# CMake replaces only the padding it now expects and keeps the rest: a library that
-# links nothing outside the system, such as libOpenSwathAlgo, was packaged with
-# $ORIGIN/../lib/ followed by about 90 empty entries. Relinking before packaging
-# would avoid the padding, but 'all' also contains the documentation target, which
-# is always out of date and would regenerate the whole documentation.
+# PACKAGE_TYPE=none also names the directories of the libraries it links (the OpenMS
+# core, Qt; top-level CMakeLists.txt), so it is far longer than that of a package.
+# When installing, CMake replaces only the padding it now expects and keeps the rest,
+# so the packaged file got $ORIGIN/../lib/ followed by dozens of empty entries.
+# Relinking before packaging would avoid the padding, but 'all' also contains the
+# documentation target, which is always out of date and would regenerate the whole
+# documentation.
 
 ## Without it the glob below would start at the file system root.
 if(NOT IS_DIRECTORY "${CPACK_TEMPORARY_DIRECTORY}")

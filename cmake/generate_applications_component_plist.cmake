@@ -6,20 +6,20 @@
 # $Authors: Julianus Pfeuffer $
 # --------------------------------------------------------------------------
 
-## Writes the component property list that pkgbuild gets for the Applications component
-## (PLIST of cpack_add_component in cmake/package_components.cmake) and sets
+## Writes the component property list that pkgbuild gets for the component of the GUI
+## applications (PLIST of cpack_add_component in cmake/package_components.cmake) and sets
 ## APPLICATIONS_COMPONENT_PLIST to it. Included by cmake/package_mac_productbuild.cmake,
 ## after CPACK_PACKAGING_INSTALL_PREFIX is set.
 ##
 ## pkgbuild marks every app bundle relocatable by default. The installer then looks for a
 ## bundle with the same identifier anywhere on the disk and updates that copy instead of
 ## installing into the package's folder. Our identifiers (de.openms.<name>) are the same in
-## every version, so the apps of a new OpenMS ended up in the folder of an older one, or in
-## a build tree. pkgbuild reads BundleIsRelocatable only from this plist, not from the
+## every version, so the apps of a new OpenMS ended up in the folder of an older one (next to
+## a core of another version), or in a build tree. pkgbuild reads BundleIsRelocatable only from this plist, not from the
 ## Info.plist of a bundle. The other keys keep the values pkgbuild uses by default.
 
 ## add_mac_app_bundle() (src/openms_gui/add_mac_bundle.cmake) records every bundle it
-## installs; there are none without WITH_GUI.
+## installs.
 get_property(_openms_app_bundles GLOBAL PROPERTY OPENMS_APP_BUNDLES)
 if(NOT _openms_app_bundles)
   return()
@@ -28,8 +28,8 @@ endif()
 ## The path is relative to the root pkgbuild packages, which holds the install prefix:
 ## Applications/OpenMS-<version>/TOPPView.app
 string(REGEX REPLACE "^/" "" _openms_bundle_dir "${CPACK_PACKAGING_INSTALL_PREFIX}")
-## Packages of other branches carry the branch name in the version (CMakeLists.txt), and a
-## branch name may contain characters that XML reserves; & first.
+## Packages of other branches carry the branch name in the version (cmake/find_openms.cmake),
+## and a branch name may contain characters that XML reserves; & first.
 string(REPLACE "&" "&amp;" _openms_bundle_dir "${_openms_bundle_dir}")
 string(REPLACE "<" "&lt;" _openms_bundle_dir "${_openms_bundle_dir}")
 string(REPLACE ">" "&gt;" _openms_bundle_dir "${_openms_bundle_dir}")

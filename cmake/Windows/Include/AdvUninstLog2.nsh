@@ -97,9 +97,7 @@ FunctionEnd
     ClearErrors #ClearErrors from displaying
     FileRead $unlog_tmp_0 $R0 #Reads string lines from a file and stores them in $R0
 		IfErrors UninstallEnd #If EOF has been reached
-    Push $R0 #throw contents of $R0 into stack
-	    Call un.TrimNewLines
-    Pop $R0 #takes contents of stack and places into $R0
+    ${un.TrimNewLines} "$R0" $R0
 	IfFileExists "$R0\*.*" UninstallDirectory UninstallFile
 	UninstallDirectory:
 		push $R0 #store the directory for later until the files are deleted

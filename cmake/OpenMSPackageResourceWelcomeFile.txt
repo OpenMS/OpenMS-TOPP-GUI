@@ -1,6 +1,9 @@
-Welcome to the installation of OpenMS/TOPP.
+Welcome to the installation of the OpenMS GUI.
 
-OpenMS - An open-source framework for mass spectrometry and
-TOPP - The OpenMS PiPeline
+TOPPView - a viewer for mass spectrometry data
+TOPPAS - an editor and runner for pipelines of TOPP tools
+INIFileEditor - an editor for the parameter files of the TOPP tools
+
+The OpenMS GUI requires OpenMS of the same version, which has to be installed first.
 
 For more information visit our website at www.OpenMS.de.

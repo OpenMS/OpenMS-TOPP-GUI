@@ -10,7 +10,6 @@
 # The dependencies of the GUI layer:
 #   - the installed OpenMS core with its CLI layer (OpenMS::OpenMS, OpenMS::OpenMS_CLI),
 #     of exactly the version of this repository: the GUI is compiled against its headers
-#   - Boost (header-only, a private dependency of OpenMS_GUI; the core does not export it)
 #   - Qt 6
 # Point CMAKE_PREFIX_PATH (or OpenMS_DIR) at the OpenMS installation, e.g. the OpenMS SDK.
 #------------------------------------------------------------------------------
@@ -124,10 +123,6 @@ message(STATUS "  full version string ${OPENMS_PACKAGE_VERSION_FULLSTRING} (from
 # The OpenMS SDK carries no executables; the tests that need them are then left out.
 set(OPENMS_TOPP_BIN_DIR "${OPENMS_BIN_DIR}" CACHE PATH
     "Directory with the TOPP tools of the OpenMS core (FuzzyDiff, FileInfo, ...), used by the tests.")
-
-#------------------------------------------------------------------------------
-# Boost (header-only): a private dependency of OpenMS_GUI
-find_boost()
 
 #------------------------------------------------------------------------------
 # Qt
