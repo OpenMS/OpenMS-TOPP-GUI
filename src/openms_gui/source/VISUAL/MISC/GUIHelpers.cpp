@@ -127,23 +127,10 @@ namespace OpenMS
       // we expect all unqualified urls to be file urls
       try
       {
-        std::string local_url;
         // The GUI layer installs its documentation (html-gui/) into share/doc of the OpenMS
-        // installation, next to bin/ and share/OpenMS (also when the installation was moved).
-        // In a build tree it is in <build>/doc.
-        const std::string app_dir = fromQString(QCoreApplication::applicationDirPath());
-        for (const std::string& doc_dir : {app_dir + "/../share/doc/", File::getOpenMSDataPath() + "/../doc/", app_dir + "/../doc/"})
-        {
-          if (File::readable(doc_dir + fromQString(target)))
-          {
-            local_url = File::absolutePath(doc_dir + fromQString(target));
-            break;
-          }
-        }
-        if (local_url.empty())
-        {
-          local_url = File::findDoc(fromQString(target));
-        }
+        // installation, where File::findDoc() finds it. In a build tree it is in <build>/doc.
+        const std::string build_doc = fromQString(QCoreApplication::applicationDirPath()) + "/../doc/" + fromQString(target);
+        const std::string local_url = File::readable(build_doc) ? File::absolutePath(build_doc) : File::findDoc(fromQString(target));
         url_target = QUrl::fromLocalFile(toQString(local_url));
       }
       catch (Exception::FileNotFound&)

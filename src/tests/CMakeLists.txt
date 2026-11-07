@@ -33,7 +33,8 @@ endif()
 #    TOPP tools, and TOPPBase refuses to start an unregistered tool. Not set when the
 #    core's share/OpenMS/TOOLS already holds an OpenMS-GUI.tsv (a GUI layer installed
 #    into that prefix): the tools would then be registered twice, which ToolHandler
-#    rejects.
+#    rejects. This is decided when configuring: reconfigure after installing the GUI
+#    layer into (or removing it from) the core's prefix.
 #  - QT_QPA_PLATFORM: no display is needed (ExecutePipeline creates a QApplication,
 #    the GUI tests open windows); see OPENMS_TEST_QT_QPA_PLATFORM below.
 #  - OPENMS_DATA_PATH: the last place libOpenMS looks for share/OpenMS, so it only
@@ -60,13 +61,16 @@ endif()
 set(OPENMS_GUI_TEST_REGISTRY_PATH "${_openms_gui_test_registry}" CACHE INTERNAL "OPENMS_TOOL_REGISTRY_PATH of the tests")
 unset(_openms_gui_test_registry)
 
-# openms_gui_test_environment(<test>...)
+# openms_gui_test_environment([NO_REGISTRY] <test>...)
 # Sets the environment above on the given tests. The tests must be added with
 # add_test(NAME ...) in the calling directory (the generator expressions are evaluated
-# for those only).
+# for those only). NO_REGISTRY leaves out OPENMS_TOOL_REGISTRY_PATH, for tests that run
+# only TOPP tools of the core (FuzzyDiff): the registry of this build would make the GUI
+# TOPP tools appear twice to the tools of an OpenMS built with its own GUI.
 function(openms_gui_test_environment)
+  cmake_parse_arguments(PARSE_ARGV 0 _arg "NO_REGISTRY" "" "")
   set(_env "OPENMS_DATA_PATH=${OPENMS_DATA_DIR}")
-  if(OPENMS_GUI_TEST_REGISTRY_PATH)
+  if(OPENMS_GUI_TEST_REGISTRY_PATH AND NOT _arg_NO_REGISTRY)
     list(APPEND _env "OPENMS_TOOL_REGISTRY_PATH=${OPENMS_GUI_TEST_REGISTRY_PATH}")
   endif()
   if(OPENMS_TEST_QT_QPA_PLATFORM)
@@ -84,8 +88,8 @@ function(openms_gui_test_environment)
       list(APPEND _env "QT_PLUGIN_PATH=$<PATH:GET_PARENT_PATH,$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>>")
     endif()
   endif()
-  set_property(TEST ${ARGN} APPEND PROPERTY ENVIRONMENT ${_env})
-  set_property(TEST ${ARGN} APPEND PROPERTY ENVIRONMENT_MODIFICATION ${_path})
+  set_property(TEST ${_arg_UNPARSED_ARGUMENTS} APPEND PROPERTY ENVIRONMENT ${_env})
+  set_property(TEST ${_arg_UNPARSED_ARGUMENTS} APPEND PROPERTY ENVIRONMENT_MODIFICATION ${_path})
 endfunction()
 
 ## FuzzyDiff of the core, used by the tests that compare output files

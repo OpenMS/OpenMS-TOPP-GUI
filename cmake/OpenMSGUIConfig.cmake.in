@@ -40,13 +40,20 @@ set(OpenMSGUI_QT_COMPONENTS @OPENMS_GUI_PACKAGE_QT_MODULES@)
 
 include(CMakeFindDependencyMacro)
 
-## The OpenMS core with its CLI layer, of the version the GUI layer was built against.
-## Usually installed into the same prefix (lib/cmake/OpenMS next to lib/cmake/OpenMSGUI,
-## or CMake/ for both on Windows). Not searched again when OpenMS was found already, e.g.
-## when OpenMSConfig.cmake delegates its component GUI here.
+## The OpenMS core with its CLI layer, of exactly the version the GUI layer was built
+## against (it is compiled against the core's headers). Usually installed into the same
+## prefix (lib/cmake/OpenMS next to lib/cmake/OpenMSGUI, or CMake/ for both on Windows).
+## Not searched again when OpenMS was found already, e.g. when OpenMSConfig.cmake
+## delegates its component GUI here; its version is checked instead.
 if(NOT TARGET OpenMS::OpenMS_CLI)
-  find_dependency(OpenMS @OPENMS_PACKAGE_VERSION@ EXACT CONFIG COMPONENTS CLI
+  find_dependency(OpenMS @OPENMS_GUI_CORE_VERSION@ EXACT CONFIG COMPONENTS CLI
                   HINTS "${CMAKE_CURRENT_LIST_DIR}/../OpenMS" "${CMAKE_CURRENT_LIST_DIR}")
+elseif(NOT "${OpenMS_VERSION}" VERSION_EQUAL "@OPENMS_GUI_CORE_VERSION@")
+  set(OpenMSGUI_FOUND FALSE)
+  string(CONCAT OpenMSGUI_NOT_FOUND_MESSAGE
+      "OpenMSGUI @OPENMS_PACKAGE_VERSION@ was built against OpenMS @OPENMS_GUI_CORE_VERSION@ and needs exactly that "
+      "version, but OpenMS '${OpenMS_VERSION}' (${OpenMS_DIR}) was found already.")
+  return()
 endif()
 
 ## the Qt 6 modules of the public link interface; a newer Qt 6 is binary compatible

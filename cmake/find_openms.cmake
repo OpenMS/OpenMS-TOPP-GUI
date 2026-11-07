@@ -14,6 +14,9 @@
 # Point CMAKE_PREFIX_PATH (or OpenMS_DIR) at the OpenMS installation, e.g. the OpenMS SDK.
 #------------------------------------------------------------------------------
 
+## An OpenMS whose prefix already holds an installed GUI layer would load its targets
+## (OpenMS::OpenMS_GUI) as well; this build provides that target itself.
+set(OpenMS_IGNORE_GUI_LAYER TRUE)
 find_package(OpenMS ${OPENMS_PACKAGE_VERSION} EXACT CONFIG REQUIRED COMPONENTS CLI)
 
 ## A core from before the split may have been built with its own GUI library. Its

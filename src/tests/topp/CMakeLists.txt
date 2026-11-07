@@ -59,6 +59,8 @@ if(OPENMS_FUZZYDIFF)
   set_tests_properties("TOPP_ImageCreator_1_out1" PROPERTIES DEPENDS "TOPP_ImageCreator_1")
   add_test(NAME "TOPP_ImageCreator_2_out1" COMMAND ${DIFF} -in1 ${TESTS_TEMP_DIR}/ImageCreator2.png -in2 ${DATA_DIR_TOPP}/ImageCreator_2_output.bmp)
   set_tests_properties("TOPP_ImageCreator_2_out1" PROPERTIES DEPENDS "TOPP_ImageCreator_2")
+  ## FuzzyDiff is a tool of the core: no tool registry of this build
+  openms_gui_test_environment(NO_REGISTRY "TOPP_ImageCreator_1_out1" "TOPP_ImageCreator_2_out1")
 else()
   message(STATUS "TOPP_ImageCreator_1_out1 and TOPP_ImageCreator_2_out1 are left out (no FuzzyDiff).")
 endif()

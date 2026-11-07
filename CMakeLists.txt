@@ -55,10 +55,11 @@ option(ENABLE_DOCS "Add the documentation targets (doc, doc_class_only, ...)." O
 option(ENABLE_TUTORIALS "Build the GUI code examples of the tutorials." ON)
 option(NO_WEBENGINE_WIDGETS "Do not use QtWebEngineWidgets. Disables the JavaScript views in TOPPView." OFF)
 ## The packages do not deploy QtWebEngine (its helper process and resources), so they are
-## always built without it.
+## always built without it. A normal variable for this configure only: the cache entry is
+## kept, so a later configure with PACKAGE_TYPE none uses QtWebEngineWidgets again.
 if(DEFINED PACKAGE_TYPE AND NOT "${PACKAGE_TYPE}" STREQUAL "none" AND NOT NO_WEBENGINE_WIDGETS)
-  message(STATUS "Packaging: QtWebEngineWidgets is not deployed, setting NO_WEBENGINE_WIDGETS=ON")
-  set(NO_WEBENGINE_WIDGETS ON CACHE BOOL "Do not use QtWebEngineWidgets. Disables the JavaScript views in TOPPView." FORCE)
+  message(STATUS "Packaging: QtWebEngineWidgets is not deployed, building with NO_WEBENGINE_WIDGETS=ON")
+  set(NO_WEBENGINE_WIDGETS ON)
 endif()
 option(OPENMS_TEST_INSTALLED_CONSUMER "Add a test that installs the GUI layer next to the OpenMS core and builds an external project against it." OFF)
 

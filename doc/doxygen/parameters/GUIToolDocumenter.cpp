@@ -287,7 +287,9 @@ bool generate(const ToolListType& tools, const std::string& prefix, const std::s
       std::string tmp_file = SystemSettings::getTempDirectory() + "/" + File::getUniqueName() + "_" + it->first + ".ini";
       const std::vector<std::string> ini_command_args = {"-write_ini", tmp_file};
 
-      ExternalProcess ep([&](const std::string& s) { f << s; }, [&](const std::string& s) { f << s; });
+      // the output of the tool is only reported if writing the INI file fails
+      std::string ini_output;
+      ExternalProcess ep([&](const std::string& s) { ini_output += s; }, [&](const std::string& s) { ini_output += s; });
       std::string error_msg;
       if (ep.run(command, ini_command_args, "", false, error_msg,
                  ExternalProcess::IO_MODE::READ_WRITE)
@@ -295,9 +297,11 @@ bool generate(const ToolListType& tools, const std::string& prefix, const std::s
           || ! File::exists(tmp_file))
       { // error while generation cli docu
         std::cerr << "Errors occurred while writing ini file for " << it->first << "!" << std::endl;
+        std::cerr << "Output was: \n" << ini_output << error_msg << std::endl;
         std::string args_str;
         for (const auto& a : ini_command_args) args_str += " " + a;
         std::cerr << "Command line was: \n " << command << args_str << std::endl;
+        if (File::exists(tmp_file)) File::remove(tmp_file);
         errors_occured = true;
         continue;
       }
@@ -305,7 +309,17 @@ bool generate(const ToolListType& tools, const std::string& prefix, const std::s
       // load content of written ini file
       Param p;
       ParamXMLFile pf;
-      pf.load(tmp_file, p);
+      try
+      {
+        pf.load(tmp_file, p);
+      }
+      catch (const Exception::BaseException& e)
+      {
+        std::cerr << "Errors occurred while reading the ini file of " << it->first << ": " << e.what() << std::endl;
+        File::remove(tmp_file);
+        errors_occured = true;
+        continue;
+      }
       File::remove(tmp_file);
       ofstream f_html((std::string("output/") + prefix + it->first + ".html").c_str());
       convertINI2HTML(p, f_html);

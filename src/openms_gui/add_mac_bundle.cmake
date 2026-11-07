@@ -80,15 +80,28 @@ macro(add_mac_app_bundle _name)
 		## Load Qt through @rpath, i.e. from lib/ (the runtime dependency set of
 		## cmake/package_general.cmake has put it there); then sign the bundle, which the fix-up
 		## would invalidate afterwards.
-		install(CODE "execute_process(COMMAND ${OPENMS_HOST_DIRECTORY}/cmake/MacOSX/fix_dependencies.rb -b \${CMAKE_INSTALL_PREFIX}/${_name}.app/Contents/MacOS/ -e @rpath/ -n -c)"
-						COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
-		## The identity is CPACK_BUNDLE_APPLE_CERT_APP (the top-level CMakeLists.txt; '-' signs ad hoc).
-		## It has to be unique and present in an unlocked keychain of the search list.
 		install(CODE "
-execute_process(COMMAND codesign --deep --force --options runtime --timestamp --sign \"${CPACK_BUNDLE_APPLE_CERT_APP}\" -i de.openms.${_name} \${CMAKE_INSTALL_PREFIX}/${_name}.app OUTPUT_VARIABLE sign_out ERROR_VARIABLE sign_out)
+execute_process(COMMAND ${OPENMS_HOST_DIRECTORY}/cmake/MacOSX/fix_dependencies.rb -b \${CMAKE_INSTALL_PREFIX}/${_name}.app/Contents/MacOS/ -e @rpath/ -n -c RESULT_VARIABLE fix_result)
+if(NOT fix_result EQUAL 0)
+  message(FATAL_ERROR \"fix_dependencies.rb failed for ${_name}.app (\${fix_result})\")
+endif()" COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
+		## The identity is CPACK_BUNDLE_APPLE_CERT_APP (the top-level CMakeLists.txt; '-' signs ad hoc).
+		## It has to be unique and present in an unlocked keychain of the search list. A secure
+		## timestamp is only requested for a real identity (ad hoc signatures cannot have one).
+		if("${CPACK_BUNDLE_APPLE_CERT_APP}" STREQUAL "-")
+			set(_codesign_timestamp "")
+		else()
+			set(_codesign_timestamp "--timestamp")
+		endif()
+		install(CODE "
+execute_process(COMMAND codesign --deep --force --options runtime ${_codesign_timestamp} --sign \"${CPACK_BUNDLE_APPLE_CERT_APP}\" -i de.openms.${_name} \${CMAKE_INSTALL_PREFIX}/${_name}.app RESULT_VARIABLE sign_result OUTPUT_VARIABLE sign_out ERROR_VARIABLE sign_out)
 message(STATUS \"\${sign_out}\")
+if(NOT sign_result EQUAL 0)
+  message(FATAL_ERROR \"codesign failed for ${_name}.app (\${sign_result})\")
+endif()
 execute_process(COMMAND codesign -dv \${CMAKE_INSTALL_PREFIX}/${_name}.app OUTPUT_VARIABLE sign_check_out ERROR_VARIABLE sign_check_out)
 message(STATUS \"\${sign_check_out}\")" COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
+		unset(_codesign_timestamp)
 	else()
 		## A plain installation: the bundle finds the libraries through its install RPATH. A
 		## runtime dependency set takes at most one bundle executable, hence one per bundle

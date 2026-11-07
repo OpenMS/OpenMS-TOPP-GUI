@@ -98,28 +98,51 @@ endif()
 ## fix_dependencies.rb only rewrites the load paths to @rpath/<name> (-n -c): the runtime
 ## dependency set (package_general.cmake) has collected the libraries already.
 set(_openms_fix "${OPENMS_HOST_DIRECTORY}/cmake/MacOSX/fix_dependencies.rb")
-## codesign every file under <dir> with the identifier <prefix>.<file name>
+## A secure timestamp is only requested for a real identity ('-' signs ad hoc, without one)
+if("${CPACK_BUNDLE_APPLE_CERT_APP}" STREQUAL "-")
+  set(_openms_codesign_timestamp "")
+else()
+  set(_openms_codesign_timestamp "--timestamp")
+endif()
+## codesign every file under <dir> (no symbolic links) with the identifier <prefix>.<file name>
 macro(_openms_gui_sign_files _dir _id_prefix _component)
   install(CODE "
-    execute_process(COMMAND find \"\${CMAKE_INSTALL_PREFIX}/${_dir}/\" -type f -execdir codesign --force --options runtime --timestamp -i ${_id_prefix}.{} --sign \"${CPACK_BUNDLE_APPLE_CERT_APP}\" {} \\;
-                    OUTPUT_VARIABLE _sign_out ERROR_VARIABLE _sign_out)
-    message(STATUS \"\${_sign_out}\")"
+    file(GLOB_RECURSE _sign_files LIST_DIRECTORIES false \"\${CMAKE_INSTALL_PREFIX}/${_dir}/*\")
+    foreach(_sign_file IN LISTS _sign_files)
+      if(IS_SYMLINK \"\${_sign_file}\")
+        continue()
+      endif()
+      get_filename_component(_sign_name \"\${_sign_file}\" NAME)
+      execute_process(COMMAND codesign --force --options runtime ${_openms_codesign_timestamp} -i ${_id_prefix}.\${_sign_name} --sign \"${CPACK_BUNDLE_APPLE_CERT_APP}\" \"\${_sign_file}\"
+                      RESULT_VARIABLE _sign_result OUTPUT_VARIABLE _sign_out ERROR_VARIABLE _sign_out)
+      message(STATUS \"\${_sign_out}\")
+      if(NOT _sign_result EQUAL 0)
+        message(FATAL_ERROR \"codesign failed for \${_sign_file} (\${_sign_result})\")
+      endif()
+    endforeach()"
     COMPONENT ${_component})
 endmacro()
+## fix_dependencies.rb <args>; fails the installation when the script fails (a function:
+## the arguments refer to \${CMAKE_INSTALL_PREFIX}, which a macro would expand here)
+function(_openms_gui_fix_dependencies _component)
+  install(CODE "
+    execute_process(COMMAND ${_openms_fix} ${ARGN} RESULT_VARIABLE _fix_result)
+    if(NOT _fix_result EQUAL 0)
+      message(FATAL_ERROR \"fix_dependencies.rb failed (\${_fix_result})\")
+    endif()"
+    COMPONENT ${_component})
+endfunction()
 
 ## libOpenMS_GUI
-install(CODE "execute_process(COMMAND ${_openms_fix} -l \${CMAKE_INSTALL_PREFIX}/${INSTALL_LIB_DIR}/ -e @rpath/ -n -c)"
-        COMPONENT library_gui)
+_openms_gui_fix_dependencies(library_gui -l \${CMAKE_INSTALL_PREFIX}/${INSTALL_LIB_DIR}/ -e @rpath/ -n -c)
 _openms_gui_sign_files(${INSTALL_LIB_DIR} de.openms.TOPP.libs library_gui)
 
 ## Qt and the libraries it needs, the Qt plugins
-install(CODE "execute_process(COMMAND ${_openms_fix} -l \${CMAKE_INSTALL_PREFIX}/${INSTALL_LIB_DIR}/ -p \${CMAKE_INSTALL_PREFIX}/${INSTALL_PLUGIN_DIR}/ -e @rpath/ -n -c)"
-        COMPONENT Dependencies)
+_openms_gui_fix_dependencies(Dependencies -l \${CMAKE_INSTALL_PREFIX}/${INSTALL_LIB_DIR}/ -p \${CMAKE_INSTALL_PREFIX}/${INSTALL_PLUGIN_DIR}/ -e @rpath/ -n -c)
 _openms_gui_sign_files(${INSTALL_LIB_DIR} de.openms.TOPP.libs Dependencies)
 
 ## ExecutePipeline, ImageCreator
-install(CODE "execute_process(COMMAND ${_openms_fix} -b \${CMAKE_INSTALL_PREFIX}/${INSTALL_BIN_DIR}/ -e @rpath/ -n -c)"
-        COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
+_openms_gui_fix_dependencies(${OPENMS_GUI_APPLICATIONS_COMPONENT} -b \${CMAKE_INSTALL_PREFIX}/${INSTALL_BIN_DIR}/ -e @rpath/ -n -c)
 _openms_gui_sign_files(${INSTALL_BIN_DIR} de.openms.TOPP ${OPENMS_GUI_APPLICATIONS_COMPONENT})
 
 ## The components of the package (productbuild installs each listed component by name,
