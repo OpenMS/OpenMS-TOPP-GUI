@@ -1,0 +1,56 @@
+# Copyright (c) 2002-present, OpenMS Inc. -- EKU Tuebingen, ETH Zurich, and FU Berlin
+# SPDX-License-Identifier: BSD-3-Clause
+# 
+# --------------------------------------------------------------------------
+# $Maintainer: Julianus Pfeuffer $
+# $Authors: Julianus Pfeuffer $
+# --------------------------------------------------------------------------
+
+
+
+set(CPACK_RPM_PACKAGE_VENDOR "OpenMS Inc <info@openms.de>")
+if((DEFINED ENV{CPACK_PACKAGE_FILE_NAME}) AND (NOT "$ENV{CPACK_PACKAGE_FILE_NAME}" STREQUAL ""))
+  set(CPACK_PACKAGE_FILE_NAME "$ENV{CPACK_PACKAGE_FILE_NAME}")
+else()
+  # Use CMAKE_SYSTEM_PROCESSOR to detect actual architecture
+  set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${OPENMS_PACKAGE_VERSION_FULLSTRING}-RedHat-Linux-${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+
+## Debug for now.
+set(CPACK_RPM_PACKAGE_DEBUG ON)
+
+## TODO also install headers? make a dev package configuration?
+## The libraries come in layers (cmake/install_macros.cmake): library (core),
+## library_cli (TOPP tool framework, needed by the TOPP tools) and library_gui.
+## 'Applications' as install_tool() registers it: CPack installs a component by
+## name and a mismatch would package none of the TOPP tools.
+set(CPACK_COMPONENTS_ALL Applications doc library library_cli share ${THIRDPARTY_COMPONENT_GROUP})
+if(WITH_GUI)
+  ## the GUI applications (install_tool() in src/openms_gui/CMakeLists.txt)
+  list(APPEND CPACK_COMPONENTS_ALL library_gui ${OPENMS_GUI_APPLICATIONS_COMPONENT})
+endif()
+
+SET(CPACK_RPM_PACKAGE_LICENSE "BSD clause 3")
+#SET(CPACK_RPM_PACKAGE_AUTOREQ ON)
+#SET(CPACK_RPM_PACKAGE_AUTOPROV ON)
+SET(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
+SET(CPACK_RPM_COMPRESSION_TYPE xz)
+SET(CPACK_RPM_INSTALL_WITH_EXEC ON)
+SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "package for LC/MS data management and analysis")
+SET(CPACK_PACKAGE_DESCRIPTION "
+ OpenMS is a package for LC/MS data management and analysis. OpenMS
+ offers an infrastructure for the development of mass
+ spectrometry-related software and powerful 2D and 3D visualization
+ solutions.
+ .
+ TOPP (the OpenMS PiPeline) is a pipeline for the analysis
+ of HPLC/MS data. It consists of a set of numerous small applications
+ that can be chained together to create analysis pipelines tailored
+ for a specific problem."
+ )
+
+## Create own target because you cannot "depend" on the internal target 'package'
+add_custom_target(dist
+  COMMAND cpack -G ${CPACK_GENERATOR}
+  COMMENT "Building ${CPACK_GENERATOR} package"
+)

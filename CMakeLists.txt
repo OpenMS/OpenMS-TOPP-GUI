@@ -1,0 +1,879 @@
+# Copyright (c) 2002-present, OpenMS Inc. -- EKU Tuebingen, ETH Zurich, and FU Berlin
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# --------------------------------------------------------------------------
+# $Maintainer: Julianus Pfeuffer $
+# $Authors: Stephan Aiche, Julianus Pfeuffer $
+# --------------------------------------------------------------------------
+
+
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR) ## Subdirectories pulled
+## in via add_subdirectory() deliberately do NOT declare their own: doing so resets the policy scope
+## for that directory to the older version
+
+# The vcpkg toolchain must be selected before project() initializes compilers.
+# The CMake presets set OPENMS_USE_VCPKG=ON and build the dependencies with vcpkg.
+# A configure without a preset takes them from system packages and CMAKE_PREFIX_PATH.
+option(OPENMS_USE_VCPKG "Use vcpkg manifest mode for dependency management (OFF: system packages and CMAKE_PREFIX_PATH)." OFF)
+
+if(OPENMS_USE_VCPKG AND NOT CMAKE_TOOLCHAIN_FILE)
+  set(_openms_submodule_vcpkg_toolchain "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake")
+
+  if(EXISTS "${_openms_submodule_vcpkg_toolchain}")
+    set(CMAKE_TOOLCHAIN_FILE "${_openms_submodule_vcpkg_toolchain}" CACHE FILEPATH "CMake toolchain file")
+  else()
+    message(FATAL_ERROR
+      "OPENMS_USE_VCPKG is ON, but no vcpkg toolchain was found.\n"
+      "Either\n"
+      "  - build the dependencies with vcpkg: run 'git submodule update --init vcpkg' "
+      "(or clone with --recurse-submodules) and configure with a preset, e.g. "
+      "'cmake --preset linux-x64-release' ('cmake --list-presets' lists them), or set "
+      "CMAKE_TOOLCHAIN_FILE to <vcpkg root>/scripts/buildsystems/vcpkg.cmake; or\n"
+      "  - take the dependencies from system packages or CMAKE_PREFIX_PATH: configure "
+      "with -DOPENMS_USE_VCPKG=OFF.")
+  endif()
+
+  unset(_openms_submodule_vcpkg_toolchain)
+endif()
+
+# Handle default build type
+get_property(multiConfig GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT multiConfig AND NOT DEFINED CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build.")
+endif()
+
+# Early MSVC toolset guard (skipped by non-MSVC compiler)
+#
+# The authoritative compiler version checks live in cmake/min_compiler_versions.cmake
+# and run further down, but they are too late to be useful on Windows: with
+# OPENMS_USE_VCPKG the toolchain builds every dependency from inside project()
+# below, so an unsupported toolset fails while compiling, leaving the user wondering
+# what happened -- before any of our own checks run.
+#
+# We therefore repeat the MSVC check here using %VCToolsVersion%, which vcvars
+# always sets and which is the one piece of toolset information available before
+# a compiler has been detected. Keep the version in sync with
+# cmake/min_compiler_versions.cmake (OPENMS_MIN_MSVC_TOOLSET)
+if(WIN32 AND DEFINED ENV{VCToolsVersion} AND "$ENV{VCToolsVersion}" VERSION_LESS "14.44")
+  message(FATAL_ERROR
+    "OpenMS requires Visual Studio 2022 version 17.14 or later (MSVC toolset 14.44+), but the current "
+    "environment provides toolset $ENV{VCToolsVersion}.\n"
+    "\n" 
+    "Please update Visual Studio.")
+endif()
+
+project("OpenMS_host" LANGUAGES CXX)
+
+# A toolchain file given by the user (cross compiling, conda, ...) is not
+# necessarily vcpkg's. vcpkg.cmake sets VCPKG_TOOLCHAIN; a different toolchain
+# would otherwise only surface as missing dependencies much later.
+if(OPENMS_USE_VCPKG AND NOT VCPKG_TOOLCHAIN)
+  message(FATAL_ERROR
+    "OPENMS_USE_VCPKG is ON, but the toolchain file '${CMAKE_TOOLCHAIN_FILE}' "
+    "is not vcpkg's. Pass vcpkg's toolchain (<vcpkg root>/scripts/buildsystems/vcpkg.cmake) and "
+    "chain-load your own with -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=<file>, or configure with "
+    "-DOPENMS_USE_VCPKG=OFF to take the dependencies from system packages or CMAKE_PREFIX_PATH.")
+endif()
+
+# required for cmake < 3.13 if ccache is used
+set(CMAKE_AUTOMOC_COMPILER_PREDEFINES OFF)
+
+#------------------------------------------------------------------------------
+# General CMake definitions & helper
+#------------------------------------------------------------------------------
+# FetchContent without a sub-build (CMake >= 3.30).
+# (required to allow changing the Generator in the main project, without deleting the FetchContent sub-build)
+if(POLICY CMP0168)  ## obsolete in CMake 3.30+
+  cmake_policy(SET CMP0168 NEW)
+endif()
+
+SET(CMAKE_ALLOW_LOOSE_LOOP_CONSTRUCTS true)
+#------------------------------------------------------------------------------
+## CMake sanity check: sometimes CMAKE_SIZEOF_VOID_P just vanishes when
+## updating CMake.
+if (NOT CMAKE_SIZEOF_VOID_P)
+	message(FATAL_ERROR "'CMAKE_SIZEOF_VOID_P' is undefined. Thus you should"
+                      " delete CMakeFiles (the directory) and the"
+                      " CMakeCache.txt and rerun CMake again! This is some"
+                      " weird CMake bug that seems to appear when updating the"
+                      " CMake version.")
+endif()
+
+#------------------------------------------------------------------------------
+# Enable testing with CTest
+enable_testing()
+
+#------------------------------------------------------------------------------
+# entries meant to be configured using CMake cache
+# - do NOT hardcode them here!
+# - edit them within CMakeCache.txt using ccmake or cmake -DVAR=VALUE
+#------------------------------------------------------------------------------
+# CMAKE_PREFIX_PATH
+# CMAKE_BUILD_TYPE
+# STL_DEBUG
+# ADDRESS_SANITIZER
+# OPENMS_COVERAGE
+#------------------------------------------------------------------------------
+option(MT_ENABLE_OPENMP "Enable OpenMP support" ON)
+option(MT_REQUIRE_OPENMP "With MT_ENABLE_OPENMP, fail the configuration if no OpenMP runtime is found, instead of falling back to -fopenmp-simd (no parallel regions). The CI presets set it." OFF)
+option(HAS_XSERVER "Indicates if an X server is available. If set to Off it will disable certain tests and the doc target." ON)
+option(ENABLE_DOCS "Indicates whether documentation should be built." ON)
+option(BUILD_TOPP_TOOLS "Build the TOPP command-line applications." ON)
+option(INSTALL_OPENMS_EXAMPLES "Install the OpenMS example data." ON)
+option(WITH_GUI "Build GUI parts of OpenMS (TOPPView&Co). This requires QtGui." ON)
+option(NO_WEBENGINE_WIDGETS "Do not use QtWebengineWidgets. Disables Javascript views in TOPPView." OFF)
+option(WITH_HDF5 "Build HDF5 parts of OpenMS." OFF)
+option(WITH_OPENTIMS "Build with Bruker TimsTOF .d file support via opentims" ON)
+option(OPENMS_ENABLE_MZPEAK "Build with mzPeak (HUPO-PSI Parquet-based raw data format) support via the vendored mzPeak library (needs Arrow/Parquet, which OpenMS requires anyway)" ON)
+option(WITH_ONNX "Build with ONNX Runtime support for PeptDeep ML bindings" OFF)
+option(ENABLE_OPENTIMS_TESTS "Download Bruker test data for opentims integration tests" OFF)
+# Every platform we build for reads RAW files: the Thermo CommonCore assemblies are
+# architecture-neutral IL, and only the bridge around them is compiled per target.
+option(WITH_THERMO_RAW "Build with Thermo RAW file reading support via openms-thermo-bridge" ON)
+option(ENABLE_THERMO_RAW_TESTS "Download Thermo RAW test data for integration tests" OFF)
+option(ENABLE_THERMO_FAIMS_DIA_TESTS "Download Thermo FAIMS-DIA test data for integration tests" OFF)
+option(ENABLE_FAIMS_DDA_TESTS "Download FAIMS-DDA test data (mzML) for integration tests" OFF)
+option(ENABLE_TDL "Load dependency and compile against TDL (required for CWL file support)." OFF)
+option(ENABLE_CWL_GENERATION "Build and validate the CWL description files for all TOPP tools (Requires ENABLE_TDL=ON)." OFF)
+
+## Build only the applications (TOPP tools and/or the GUI) against an installed OpenMS
+## library of the same version instead of building the libraries, e.g. to package OpenMS in
+## layers (see cmake/find_installed_openms.cmake). Point OpenMS_DIR or CMAKE_PREFIX_PATH at
+## the installation. Tests, documentation and pyOpenMS need the library targets of this build
+## and are not built in this mode.
+option(OPENMS_USE_INSTALLED_LIBRARY "Build the TOPP tools and/or the GUI against an installed OpenMS library instead of building the libraries." OFF)
+if(OPENMS_USE_INSTALLED_LIBRARY AND ENABLE_CWL_GENERATION)
+  message(FATAL_ERROR "ENABLE_CWL_GENERATION is not supported together with OPENMS_USE_INSTALLED_LIBRARY.")
+endif()
+
+if(ENABLE_CWL_GENERATION AND NOT ENABLE_TDL)
+    message(FATAL_ERROR "ENABLE_CWL_GENERATION requires ENABLE_TDL to be ON.")
+endif()
+if(ENABLE_CWL_GENERATION AND NOT BUILD_TOPP_TOOLS)
+    message(FATAL_ERROR "ENABLE_CWL_GENERATION requires BUILD_TOPP_TOOLS to be ON.")
+endif()
+
+if(MSVC)
+  option(MT_ENABLE_NESTED_OPENMP "Enable nested parallelism." OFF)
+else()
+  option(MT_ENABLE_NESTED_OPENMP "Enable nested parallelism." ON)
+endif()
+
+if (ENABLE_OPENTIMS_TESTS AND WITH_OPENTIMS)
+  include(FetchContent)
+  # Mirror of the timsrust_cpp_bridge "test-data-v1" release, hosted on the OpenMS
+  # infra fileserver (archive.openms.de). NOTE: this host currently answers only on
+  # plain HTTP (no HTTPS listener yet) and port 80 is reachable only from whitelisted
+  # CI/build networks at the perimeter firewall. URL_HASH pins each file's
+  # integrity so the weaker transport cannot corrupt a download silently.
+  set(OPENTIMS_TESTDATA_URL "http://archive.openms.de/openms/testfiles")
+  FetchContent_Declare(
+    opentims_testdata_dda
+    URL "${OPENTIMS_TESTDATA_URL}/DDA_HeLa_50ng_5_6min.d.zip"
+    URL_HASH SHA256=659d691e48d621edcd1fecb8448de5731147c009bda42ba6e7e5ed53e46dc15c
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
+  FetchContent_Declare(
+    opentims_testdata_dia
+    URL "${OPENTIMS_TESTDATA_URL}/DIA_HeLa_50ng_5_6min.d.zip"
+    URL_HASH SHA256=bacf98b472ed3a3cfef2c2595a726fc6c06f059a41c17d9035b2b864932b6f5d
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
+  FetchContent_Declare(
+    opentims_testdata_fasta
+    URL "${OPENTIMS_TESTDATA_URL}/human_sp.fasta"
+    URL_HASH SHA256=b205ed9970fee62413e2f192c6fb82daab86e4a5897ef521f907ecbfcd7b3e63
+    DOWNLOAD_NO_EXTRACT TRUE
+  )
+  FetchContent_MakeAvailable(opentims_testdata_dda opentims_testdata_dia opentims_testdata_fasta)
+  set(OPENTIMS_DDA_TEST_DATA "${opentims_testdata_dda_SOURCE_DIR}" CACHE PATH "Path to DDA test .d directory")
+  set(OPENTIMS_DIA_TEST_DATA "${opentims_testdata_dia_SOURCE_DIR}" CACHE PATH "Path to DIA test .d directory")
+  set(OPENTIMS_TEST_FASTA "${opentims_testdata_fasta_SOURCE_DIR}/human_sp.fasta" CACHE PATH "Path to human Swiss-Prot FASTA for search tests")
+endif()
+
+if (ENABLE_THERMO_RAW_TESTS AND WITH_THERMO_RAW)
+  include(FetchContent)
+  # Angiotensin_AllScans.raw originally from PNNL-Comp-Mass-Spec/Thermo-Raw-File-Reader
+  # (BSD-2-Clause, (c) 2018 Battelle Memorial Institute), commit 1d8ff309. Contains
+  # 87 MS1 (FTMS Full ms) plus hundreds of MS2 scans with HCD and supplemental-
+  # activation (ETD+HCD, ETD+CID) filters at precursor m/z 432.9 — exercises the
+  # full activation-method switch in ThermoRawFile.cpp and MS1+MSn round-trip via
+  # mzML. Served from the OpenMS infra mirror (see OPENTIMS_TESTDATA_URL note above
+  # re: plain HTTP); URL_HASH below pins integrity/reproducibility.
+  FetchContent_Declare(
+    thermo_raw_testdata
+    URL "http://archive.openms.de/openms/testfiles/Angiotensin_AllScans.raw"
+    URL_HASH SHA256=3a0236f719e7c91e3c958f57f4e66ae422803ec3e6a997b9af4d2af395332b9f
+    DOWNLOAD_NO_EXTRACT TRUE
+  )
+  FetchContent_MakeAvailable(thermo_raw_testdata)
+  set(THERMO_RAW_TEST_DATA "${thermo_raw_testdata_SOURCE_DIR}/Angiotensin_AllScans.raw" CACHE PATH "Path to Thermo RAW test file")
+endif()
+
+# Optional end-to-end FAIMS-DIA integration fixture. A developer can either set
+# THERMO_FAIMS_DIA_TEST_DATA explicitly to an existing local RAW file, or enable
+# ENABLE_THERMO_FAIMS_DIA_TESTS to fetch the pinned public PRIDE fixture. The
+# ~308 MB download remains opt-in and is not part of normal OpenMS builds/tests.
+set(THERMO_FAIMS_DIA_TEST_DATA "${THERMO_FAIMS_DIA_TEST_DATA}" CACHE FILEPATH
+    "Path to a Thermo FAIMS-DIA RAW file for integration testing")
+if (ENABLE_THERMO_FAIMS_DIA_TESTS AND WITH_THERMO_RAW AND NOT THERMO_FAIMS_DIA_TEST_DATA)
+  include(FetchContent)
+  # Public single-CV FAIMS-DIA run from PRIDE PXD029902. The pinned hash fixes
+  # the exact 308,209,820-byte input used by ThermoRawFile_test.
+  FetchContent_Declare(
+    thermo_faims_dia_testdata
+    URL "https://ftp.pride.ebi.ac.uk/pride/data/archive/2023/08/PXD029902/20210213_WTC11_DIA_5CV.raw"
+    URL_HASH SHA256=e98b2cc95d162b1dfd24cf003434ef0deef085d7c99ffc0fde695aec8bf236b1
+    DOWNLOAD_NO_EXTRACT TRUE
+  )
+  FetchContent_MakeAvailable(thermo_faims_dia_testdata)
+  set(THERMO_FAIMS_DIA_TEST_DATA
+      "${thermo_faims_dia_testdata_SOURCE_DIR}/20210213_WTC11_DIA_5CV.raw"
+      CACHE FILEPATH "Path to a Thermo FAIMS-DIA RAW file for integration testing" FORCE)
+endif()
+
+if (THERMO_FAIMS_DIA_TEST_DATA AND NOT EXISTS "${THERMO_FAIMS_DIA_TEST_DATA}")
+  message(FATAL_ERROR
+    "THERMO_FAIMS_DIA_TEST_DATA does not exist: ${THERMO_FAIMS_DIA_TEST_DATA}")
+endif()
+
+if ((ENABLE_THERMO_FAIMS_DIA_TESTS OR THERMO_FAIMS_DIA_TEST_DATA) AND NOT WITH_THERMO_RAW)
+  message(WARNING
+    "Thermo FAIMS-DIA integration testing was requested but WITH_THERMO_RAW=OFF; the test will not run.")
+endif()
+
+# Optional end-to-end FAIMS-DDA integration fixture: a 2 h LC-MS/MS DDA run of E. coli lysate on an
+# Orbitrap Exploris 480 with FAIMS, stepping through three compensation voltages (-45, -55 and -65 V),
+# as mzML (converted from AWulf_060919_Ecoli_UV_S30_FAIMS_45_55_65.raw). A developer can either set
+# FAIMS_DDA_TEST_DATA explicitly to a local copy, or enable ENABLE_FAIMS_DDA_TESTS to fetch the pinned
+# file. The ~1.1 GB download is opt-in and not part of normal OpenMS builds/tests.
+set(FAIMS_DDA_TEST_DATA "${FAIMS_DDA_TEST_DATA}" CACHE FILEPATH
+    "Path to a FAIMS-DDA mzML file (LC run with several compensation voltages) for integration testing")
+if (ENABLE_FAIMS_DDA_TESTS AND NOT FAIMS_DDA_TEST_DATA)
+  include(FetchContent)
+  FetchContent_Declare(
+    faims_dda_testdata
+    URL "https://archive.openms.de/openms/testfiles/FAIMS/ExplorisFAIMS-DDA-LFQ.mzML"
+    URL_HASH SHA256=595cf179534200828bd379066690eb45cd6ca8b59c1e147eecfbcc422ce43d29
+    DOWNLOAD_NO_EXTRACT TRUE
+  )
+  FetchContent_MakeAvailable(faims_dda_testdata)
+  set(FAIMS_DDA_TEST_DATA
+      "${faims_dda_testdata_SOURCE_DIR}/ExplorisFAIMS-DDA-LFQ.mzML"
+      CACHE FILEPATH "Path to a FAIMS-DDA mzML file (LC run with several compensation voltages) for integration testing" FORCE)
+endif()
+
+if (FAIMS_DDA_TEST_DATA AND NOT EXISTS "${FAIMS_DDA_TEST_DATA}")
+  message(FATAL_ERROR
+    "FAIMS_DDA_TEST_DATA does not exist: ${FAIMS_DDA_TEST_DATA}")
+endif()
+
+#------------------------------------------------------------------------------
+# Extend module path with our modules
+# (create an empty list if CMAKE_MODULE_PATH does not exist)
+if(NOT CMAKE_MODULE_PATH)
+	set(CMAKE_MODULE_PATH)
+endif()
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/Modules")
+## CMake looks for the NSIS script in the module path.
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/Windows")
+
+#------------------------------------------------------------------------------
+# OpenMS Version Information
+#------------------------------------------------------------------------------
+
+set(OPENMS_PACKAGE_VERSION_MAJOR "3")
+set(OPENMS_PACKAGE_VERSION_MINOR "7")
+set(OPENMS_PACKAGE_VERSION_PATCH "0")
+set(OPENMS_PACKAGE_VERSION "${OPENMS_PACKAGE_VERSION_MAJOR}.${OPENMS_PACKAGE_VERSION_MINOR}.${OPENMS_PACKAGE_VERSION_PATCH}")
+
+message(STATUS "Building OpenMS ${OPENMS_PACKAGE_VERSION}")
+#------------------------------------------------------------------------------
+# retrieve detailed information on the working copy (git)
+include(GetGitRevisionDescription)
+option(GIT_TRACKING "Embedding of Git version control information into the OpenMS library (and OpenMSInfo tool). Note that if activated, every branch-switch or commit will trigger re-generation of the build system (MakeFiles, VS Solutions etc)." ON)
+if (GIT_TRACKING)
+  ## A source tree made by git archive (the Release workflow's source tarball, GitHub's source
+  ## archives) has no .git of its own, but carries its commit in .git_archival.txt. That takes
+  ## precedence: a .git further up the tree would belong to another repository.
+  git_archival_info("${CMAKE_CURRENT_SOURCE_DIR}/.git_archival.txt"
+    _openms_archival_describe OPENMS_GIT_SHORT_SHA1 OPENMS_GIT_LC_DATE OPENMS_GIT_ARCHIVAL_FOUND)
+  if(OPENMS_GIT_ARCHIVAL_FOUND)
+    ## The archive of the tag v<version> of this version carries the plain version below; any
+    ## other archive is marked as exported, as before.
+    if(_openms_archival_describe STREQUAL "v${OPENMS_PACKAGE_VERSION}")
+      set(OPENMS_GIT_SHORT_REFSPEC "${_openms_archival_describe}")
+    else()
+      set(OPENMS_GIT_SHORT_REFSPEC "exported")
+    endif()
+    set(OPENMS_GIT_INFO_FOUND TRUE)
+  else()
+    ## will configure an include file
+    git_short_info(OPENMS_GIT_SHORT_REFSPEC OPENMS_GIT_SHORT_SHA1 OPENMS_GIT_LC_DATE OPENMS_GIT_INFO_FOUND)
+    ## The Release workflow builds a release from its tag, a detached checkout whose refspec is "HEAD".
+    ## If HEAD is the tag v<version> of this version, use the tag as refspec, so that the packages
+    ## carry the plain version below instead of <version>-pre-HEAD-<date>.
+    if(OPENMS_GIT_INFO_FOUND AND OPENMS_GIT_SHORT_REFSPEC STREQUAL "HEAD")
+      git_get_exact_tag(_openms_release_tag --tags --match "v${OPENMS_PACKAGE_VERSION}")
+      if(_openms_release_tag STREQUAL "v${OPENMS_PACKAGE_VERSION}")
+        set(OPENMS_GIT_SHORT_REFSPEC "${_openms_release_tag}")
+      endif()
+    endif()
+  endif()
+endif()
+
+if(NOT GIT_TRACKING)
+  ## allow overwriting of the following variables in case we build release versions
+  ## from a source package (e.g. on bioconda)
+  if(NOT DEFINED OPENMS_GIT_SHORT_SHA1)
+    set(OPENMS_GIT_SHORT_SHA1 "disabled")
+  endif()
+  if(NOT DEFINED OPENMS_GIT_SHORT_REFSPEC)
+    set(OPENMS_GIT_SHORT_REFSPEC "disabled")
+  endif()
+  if(NOT DEFINED OPENMS_GIT_LC_DATE)
+    set(OPENMS_GIT_LC_DATE "1970-01-01")
+  endif()
+  message(STATUS "  [CMake is not tracking Git commits and branching ('-D GIT_TRACKING=Off')]")
+elseif(NOT OPENMS_GIT_INFO_FOUND)
+  ## Covers a git that runs but fails, e.g. a container refusing a bind-mounted checkout;
+  ## its marker would otherwise reach VersionInfo and the package file names.
+  set(OPENMS_GIT_SHORT_SHA1 "exported")
+  set(OPENMS_GIT_SHORT_REFSPEC "exported")
+  set(OPENMS_GIT_LC_DATE "1970-01-01")
+  message(STATUS "  [CMake cannot track Git commits and branching, since Git information could not be determined. ('-D GIT_TRACKING=On')]")
+else()
+  # everything found, print some status information
+  message(STATUS "  - Repository revision ${OPENMS_GIT_SHORT_SHA1}")
+  message(STATUS "  - Repository branch ${OPENMS_GIT_SHORT_REFSPEC}")
+  message(STATUS "  - Repository last change date ${OPENMS_GIT_LC_DATE}")
+  if(OPENMS_GIT_ARCHIVAL_FOUND)
+    message(STATUS "  [Git information from .git_archival.txt, filled in by git archive ('-D GIT_TRACKING=On')]")
+  else()
+    message(STATUS "  [CMake is tracking Git commits and branching ('-D GIT_TRACKING=On')]")
+  endif()
+endif()
+
+# Additional versioning information for packaging
+# If it is not built from a release branch (or master) it will add the branch name
+# and the last change date to everything that can handle strings in the version (e.g. installer filenames)
+if(OPENMS_GIT_SHORT_REFSPEC MATCHES "disabled" OR OPENMS_GIT_SHORT_REFSPEC MATCHES "exported")
+  string(TIMESTAMP DATE "%Y%m%d")
+  set(OPENMS_PACKAGE_VERSION_PRERELEASE_IDENTIFIER "${OPENMS_GIT_SHORT_REFSPEC}-${DATE}")
+  set(OPENMS_PACKAGE_VERSION_FULLSTRING "${OPENMS_PACKAGE_VERSION}-pre-${OPENMS_PACKAGE_VERSION_PRERELEASE_IDENTIFIER}")
+elseif(OPENMS_GIT_SHORT_REFSPEC MATCHES "release*" OR OPENMS_GIT_SHORT_REFSPEC MATCHES "master"
+       OR OPENMS_GIT_SHORT_REFSPEC STREQUAL "v${OPENMS_PACKAGE_VERSION}")
+  set(OPENMS_PACKAGE_VERSION_PRERELEASE_IDENTIFIER "")
+  set(OPENMS_PACKAGE_VERSION_FULLSTRING "${OPENMS_PACKAGE_VERSION}")
+else()
+  string(REPLACE "/" "-" OPENMS_GIT_SHORT_REFSPEC_REPLACED ${OPENMS_GIT_SHORT_REFSPEC})
+  string(REPLACE "_" "-" OPENMS_GIT_SHORT_REFSPEC_REPLACED_AGAIN ${OPENMS_GIT_SHORT_REFSPEC_REPLACED})
+  set(OPENMS_GIT_LC_DATE_LIST "${OPENMS_GIT_LC_DATE}")
+  separate_arguments(OPENMS_GIT_LC_DATE_LIST)
+  list(GET OPENMS_GIT_LC_DATE_LIST 0 OPENMS_GIT_LC_DATE_ONLY)
+  set(OPENMS_PACKAGE_VERSION_PRERELEASE_IDENTIFIER "${OPENMS_GIT_SHORT_REFSPEC_REPLACED_AGAIN}-${OPENMS_GIT_LC_DATE_ONLY}")
+  set(OPENMS_PACKAGE_VERSION_FULLSTRING "${OPENMS_PACKAGE_VERSION}-pre-${OPENMS_PACKAGE_VERSION_PRERELEASE_IDENTIFIER}")
+endif()
+
+
+
+#------------------------------------------------------------------------------
+# Unsupported systems
+#------------------------------------------------------------------------------
+if (MINGW OR MSYS)
+  message(FATAL_ERROR "MSYS and/or MinGW are not supported! Please use a Visual Studio environment! See Windows build instructions for further information!")
+endif()
+
+#------------------------------------------------------------------------------
+# Setup CMAKE_PREFIX_PATH for finding external libs (vcpkg or system)
+#------------------------------------------------------------------------------
+if(OPENMS_USE_VCPKG)
+  message(STATUS "Dependency provider: vcpkg (${CMAKE_TOOLCHAIN_FILE})")
+else()
+  message(STATUS "Dependency provider: system packages and CMAKE_PREFIX_PATH "
+                 "(the CMake presets, see 'cmake --list-presets', build the dependency set CI tests with vcpkg)")
+endif()
+include(cmake/setup_lib_find_paths.cmake)
+
+#------------------------------------------------------------------------------
+# All the multi-threading stuff (OpenMP)
+#------------------------------------------------------------------------------
+include(cmake/multithreading.cmake)
+
+#------------------------------------------------------------------------------
+# Check architecture 32bit vs. 64bit
+#------------------------------------------------------------------------------
+
+if (CMAKE_SIZEOF_VOID_P MATCHES "8")
+	set(OPENMS_64BIT_ARCHITECTURE 1 CACHE INTERNAL "Architecture-bits")
+	message(STATUS "Architecture: 64 bit")
+else()
+	set(OPENMS_64BIT_ARCHITECTURE 0 CACHE INTERNAL "Architecture-bits")
+	message(STATUS "Architecture: 32 bit")
+endif()
+
+# Force build type into the cache (needs to be set beforehand)
+set(CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE} CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." FORCE)
+
+#------------------------------------------------------------------------------
+# Minimum supported compiler versions (single source of truth; also feeds the
+# version numbers quoted in the doxygen install documentation)
+#------------------------------------------------------------------------------
+include(cmake/min_compiler_versions.cmake)
+
+#------------------------------------------------------------------------------
+# Project specific compiler flags
+#------------------------------------------------------------------------------
+# Compiler flags of the OpenMS build itself. Whatever a consumer of the installed
+# package needs to compile against OpenMS is a usage requirement of the library
+# targets (target_compile_features/definitions/options with PUBLIC or INTERFACE
+# scope), which the exported targets in OpenMSTargets.cmake carry;
+# OpenMSConfig.cmake exports no flag variables.
+include(cmake/compiler_flags.cmake)
+
+# Visibility settings
+# (CMP0063, honouring visibility properties for all target types, is from CMake 3.3
+#  and is therefore already NEW by default at our minimum -- no policy set needed.)
+if (NOT CMAKE_CXX_VISIBILITY_PRESET)
+  set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
+endif()
+if (CMAKE_VISIBILITY_INLINES_HIDDEN)
+  set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
+endif()
+
+#------------------------------------------------------------------------------
+# Enable STL debug mode (GCC only)
+#------------------------------------------------------------------------------
+option(STL_DEBUG "[GCC only] Enable STL-DEBUG mode (very slow)." OFF)
+if(STL_DEBUG)
+  include(cmake/stl_debug.cmake)
+endif()
+
+#------------------------------------------------------------------------------
+# Add options for link time optimizations (LTO) aka interprocedural optimization
+#------------------------------------------------------------------------------
+option(ENABLE_IPO
+	"Enable interprocedural optimizations (LTO)" OFF)
+if(ENABLE_IPO)
+	include(CheckIPOSupported)
+	check_ipo_supported(RESULT result OUTPUT output)
+	if(result)
+		set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+	else()
+		message(SEND_ERROR "IPO/LTO is not supported: ${output}")
+	endif()
+endif()
+
+#------------------------------------------------------------------------------
+# Enable clang compile time profiling
+#------------------------------------------------------------------------------
+option(CLANG_TIME_TRACE "[Clang 9+ only] Enable clang compile time profiling." OFF)
+if(CLANG_TIME_TRACE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ftime-trace")
+endif()
+
+
+#------------------------------------------------------------------------------
+# Enable Coverage
+#------------------------------------------------------------------------------
+option(OPENMS_COVERAGE "[Clang/GCC only] Enable Coverage testing with gcov/lcov. Requires the Debug build type,
+ is slower and uses a lot of disk space (>40GB). Enables the target OpenMS_coverage to generate
+ a coverage report in html format." OFF)
+if(OPENMS_COVERAGE)
+  include(cmake/Coverage.cmake)
+endif()
+
+#------------------------------------------------------------------------------
+# Enable usage statistics
+#------------------------------------------------------------------------------
+option(ENABLE_UPDATE_CHECK "Enable update check." ON)
+if(ENABLE_UPDATE_CHECK)
+  message(STATUS "Collection of usage statistics and update notifications enabled.")
+  message(STATUS "  If you don't want this information to be transmitted to our update sever, you can:")
+  message(STATUS "    - Switch the build variable ENABLE_UPDATE_CHECK to OFF to remove the functionality at build time.")
+  message(STATUS "    - Set the environment variable OPENMS_DISABLE_UPDATE_CHECK to disable the functionality at runtime.")
+endif()
+
+
+#------------------------------------------------------------------------------
+# Enable AddressSanitizer
+#------------------------------------------------------------------------------
+option(ADDRESS_SANITIZER "Enable AddressSanitizer mode (quite slow)." OFF)
+include(${PROJECT_SOURCE_DIR}/cmake/AddressSanitizer.cmake)
+
+#------------------------------------------------------------------------------
+# we build shared libraries
+set(BUILD_SHARED_LIBS true)
+
+#------------------------------------------------------------------------------
+# Host directory for referencing from subprojects
+set(OPENMS_HOST_DIRECTORY "${PROJECT_SOURCE_DIR}")
+set(OPENMS_HOST_BINARY_DIRECTORY "${PROJECT_BINARY_DIR}")
+
+# The additional / is important to remove the last character from the path.
+# Note that it does not matter if the OS uses / or \, because we are only
+# saving the path size.
+string(LENGTH "${PROJECT_SOURCE_DIR}/" CF_SOURCE_PATH_SIZE)
+string(LENGTH "${PROJECT_BINARY_DIR}/" BINARY_PATH_SIZE)
+# Since the path's length is used to cut away a path, and OPENMS_FILENAME might be used in configured files in the build tree
+# , taking the convervative approach here, to make sure we do not cut away too much, no matter if origin is source or build tree
+if (BINARY_PATH_SIZE LESS CF_SOURCE_PATH_SIZE)
+  set(CF_SOURCE_PATH_SIZE ${BINARY_PATH_SIZE})
+endif()
+
+#------------------------------------------------------------------------------
+# CMake Utitlities
+#------------------------------------------------------------------------------
+# include some OpenMS specific macros
+include (${PROJECT_SOURCE_DIR}/cmake/build_system_macros.cmake)
+# .. and some to ease the installation process
+include (${PROJECT_SOURCE_DIR}/cmake/install_macros.cmake)
+# .. and some to ease preparing the documentation builds
+include (${PROJECT_SOURCE_DIR}/cmake/doc_macros.cmake)
+# .. and some to ease the installation process
+include (${PROJECT_SOURCE_DIR}/cmake/add_library_macros.cmake)
+# .. and some to ease the export process
+include (${PROJECT_SOURCE_DIR}/cmake/export_macros.cmake)
+
+
+#------------------------------------------------------------------------------
+# Initialize package building environment
+set(VALID_PACKAGE_TYPES "none" # the classical build type make/make install
+                        "rpm"  # rpm package
+                        "deb"  # deb package
+                        "dmg"  # a drag&drop dmg package for macOS
+                        "pkg"  # a productbuild installer for macOS
+                        "nsis" # an NSIS installer for Windows
+                        "zip") # a portable version for Windows
+
+set(PACKAGE_TYPE "none" CACHE STRING "Package type (internal): ${VALID_PACKAGE_TYPES}")
+message(STATUS "Package type is '${PACKAGE_TYPE}'")
+is_valid_package(${PACKAGE_TYPE})
+
+## The install component of the GUI applications (TOPPView, TOPPAS, ..., and the TOPP tools
+## that need the GUI library, ExecutePipeline and ImageCreator), separate from the TOPP tools
+## (component Applications) so the two can be installed and packaged independently (see
+## OPENMS_USE_INSTALLED_LIBRARY). The macOS productbuild installer keeps them in
+## Applications: it stages every component in a prefix of its own, and fixing up and
+## signing bin/ (cmake/package_mac_productbuild.cmake) addresses the staging prefix of
+## Applications.
+if("${PACKAGE_TYPE}" STREQUAL "pkg")
+  set(OPENMS_GUI_APPLICATIONS_COMPONENT Applications)
+else()
+  set(OPENMS_GUI_APPLICATIONS_COMPONENT GUIApplications)
+endif()
+
+## macOS code signing and notarization configuration
+## Required for code signing:
+##   SIGNING_IDENTITY - Developer ID Application certificate identity (e.g., "Developer ID Application: Your Name (TEAMID)")
+## Required for notarization (in addition to signing):
+##   SIGNING_EMAIL - Apple ID email for notarization
+##   CPACK_PRODUCTBUILD_IDENTITY_NAME - Developer ID Installer certificate identity (for .pkg)
+##   APPLE_APP_SPECIFIC_NOTARIZATION_PASSWORD environment variable - App-specific password for notarization
+if("${PACKAGE_TYPE}" STREQUAL "dmg" OR "${PACKAGE_TYPE}" STREQUAL "pkg")
+  if (NOT DEFINED SIGNING_IDENTITY OR "${SIGNING_IDENTITY}" STREQUAL "" OR "${SIGNING_IDENTITY}" STREQUAL "-")
+    message(WARNING "Trying to create macOS package/image without SIGNING_IDENTITY being set. "
+                    "Using ad hoc (https://developer.apple.com/documentation/security/seccodesignatureflags/adhoc) identity. "
+                    "The package will NOT be notarized and users may have trouble running it.")
+    set(CPACK_BUNDLE_APPLE_CERT_APP "-")
+  else()
+    ## CPack has a special variable for the identity
+    set(CPACK_BUNDLE_APPLE_CERT_APP "${SIGNING_IDENTITY}")
+    message(STATUS "Code signing identity: ${SIGNING_IDENTITY}")
+  endif()
+
+  ## Check notarization prerequisites (optional, only warns)
+  if (NOT DEFINED SIGNING_EMAIL OR "${SIGNING_EMAIL}" STREQUAL "")
+    message(STATUS "SIGNING_EMAIL not set. Notarization will be skipped.")
+  endif()
+endif()
+
+#------------------------------------------------------------------------------
+# Output directories
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${OPENMS_HOST_BINARY_DIRECTORY}/lib")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${OPENMS_HOST_BINARY_DIRECTORY}/bin")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${OPENMS_HOST_BINARY_DIRECTORY}/lib")
+# Some alternative variable names for internal use
+set(OPENMS_BINARY_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+set(OPENMS_SHARE_DIR "${PROJECT_SOURCE_DIR}/share/OpenMS")
+set(OPENMS_WIN32_DLL_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+
+#------------------------------------------------------------------------------
+# The TOPP tool registry is generated (cmake/topp_tool_macros.cmake) rather than checked in,
+# so it lives in the build tree, not in the source share/ directory. It is installed into
+# the share component like the rest of share/OpenMS; a build tree that was never installed
+# is what OPENMS_BUILD_TOOL_REGISTRY_PATH in config.h points ToolHandler at.
+include(${PROJECT_SOURCE_DIR}/cmake/topp_tool_macros.cmake)
+set(OPENMS_TOOL_REGISTRY_BUILD_DIR "${OPENMS_HOST_BINARY_DIRECTORY}/share/OpenMS/TOOLS")
+set(OPENMS_TOOL_REGISTRY_BUILD_FILE "${OPENMS_TOOL_REGISTRY_BUILD_DIR}/OpenMS.tsv")
+
+#------------------------------------------------------------------------------
+# define installation subdirectories to allow for custom installations
+# note that all those directories are below CMAKE_INSTALL_PREFIX
+set(INSTALL_BIN_DIR bin CACHE PATH "Installation directory for executables")
+set(INSTALL_SHARE_DIR share/OpenMS CACHE PATH "Installation directory for shared data")
+set(INSTALL_DOC_DIR share/doc CACHE PATH "Installation directory for documentation")
+set(INSTALL_INCLUDE_DIR include CACHE PATH "Installation directory for header files")
+
+if(WIN32)
+  set(DEF_INSTALL_CMAKE_DIR CMake)
+  set(DEF_INSTALL_LIB_DIR bin)
+else()
+  set(DEF_INSTALL_CMAKE_DIR lib/cmake/OpenMS)
+  set(DEF_INSTALL_LIB_DIR lib)
+endif()
+
+set(INSTALL_CMAKE_DIR ${DEF_INSTALL_CMAKE_DIR} CACHE PATH "Installation directory for CMake files")
+set(INSTALL_LIB_DIR ${DEF_INSTALL_LIB_DIR} CACHE PATH "Installation directory for libraries")
+set(INSTALL_PLUGIN_SUBDIR plugins CACHE PATH "Installation subdirectory under the lib dir for QT plugins")
+set(INSTALL_PLUGIN_DIR ${INSTALL_LIB_DIR}/${INSTALL_PLUGIN_SUBDIR})
+file(RELATIVE_PATH INSTALL_LIB_PATH_REL_TO_BIN /${INSTALL_BIN_DIR} /${INSTALL_LIB_DIR})
+set(QT_PLUGIN_PATH_REL_TO_BIN ${INSTALL_LIB_PATH_REL_TO_BIN}/${INSTALL_PLUGIN_SUBDIR})
+
+
+if(UNIX)
+	# use, i.e. don't skip the full RPATH for the build tree
+	if(NOT DEFINED CMAKE_SKIP_BUILD_RPATH)
+	  SET(CMAKE_SKIP_BUILD_RPATH FALSE)
+  endif()
+
+  if(NOT DEFINED CMAKE_MACOSX_RPATH)
+    SET(CMAKE_MACOSX_RPATH TRUE) # should be CMake default
+  endif()
+
+	# usually when building, don't use the install RPATH already
+	# (but later on when installing)
+	if(NOT DEFINED CMAKE_BUILD_WITH_INSTALL_RPATH)
+		SET(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+		SET(CMAKE_BUILD_WITH_INSTALL_NAME_DIR FALSE)
+  endif()
+
+  # Installed binaries must find the shared dependencies they were linked against
+  # (Homebrew, conda, ...) on their own: add the directories of those
+  # libraries to the install RPATH. Consumers of an installed libOpenMS then link
+  # and run without LD_LIBRARY_PATH; the linker also uses this RPATH to resolve
+  # the private dependencies of libOpenMS. System directories and directories
+  # below the build tree are never added by CMake (see the vcpkg case below).
+  # On macOS this also covers dependencies built with @rpath install names (e.g.
+  # Qt). Packages that relocate dependencies (deb, macOS pkg) skip or override it.
+  if (NOT DEFINED CMAKE_INSTALL_RPATH_USE_LINK_PATH)
+    if (APPLE)
+      if (NOT "${PACKAGE_TYPE}" STREQUAL "pkg")
+        SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+      endif()
+    elseif ("${PACKAGE_TYPE}" STREQUAL "none")
+      SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+    endif()
+  endif()
+
+  #if(NOT DEFINED CMAKE_INSTALL_NAME_DIR AND APPLE)
+  #  SET(CMAKE_INSTALL_NAME_DIR "$<INSTALL_PREFIX>/${INSTALL_LIB_DIR}")
+  #endif()
+
+  # our default RPATH to be added when installing. Can be changed per-target later, e.g. in app bundles
+  if(NOT DEFINED CMAKE_INSTALL_RPATH)
+    if (APPLE)
+      if(NOT "${PACKAGE_TYPE}" STREQUAL "pkg")
+        # currently our fix_dependencies.rb script used e.g. for dmg installer,
+				# requires our lib dir to be present in the RPATHS
+        # so it can find libOpenMS for one of our executables, even if it is linked as @rpath/libOpenMS.
+        # Disadvantage: even on the target machine, they will have the build folder baked in.
+        # Alternative: copy all our libs first so they do not need to be found.
+        # @loader_path lets an installed libOpenMS find its sibling libraries
+        # (OpenSwathAlgo, ...) when loaded by an executable outside the prefix.
+        SET(CMAKE_INSTALL_RPATH "@executable_path/${INSTALL_LIB_PATH_REL_TO_BIN}/;@loader_path/;${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
+      else()
+        SET(CMAKE_INSTALL_RPATH "@executable_path/${INSTALL_LIB_PATH_REL_TO_BIN}/")
+      endif()
+    else() # linux and variants
+      SET(CMAKE_INSTALL_RPATH "$ORIGIN/${INSTALL_LIB_PATH_REL_TO_BIN}/")
+    endif()
+	endif()
+
+  # vcpkg installs the dependencies below the build tree, and CMake deliberately
+  # keeps build-tree directories out of the install RPATH, so the link path above
+  # does not cover them. For plain (non-packaging) builds, reference the vcpkg
+  # library directory explicitly: an installation made from a vcpkg build tree
+  # then works as long as that tree exists, which is the situation of a developer
+  # or a consumer building against it. Packages copy the dependencies next to
+  # the libraries instead (see package_general.cmake) and must not carry a
+  # build-machine path in their RPATH.
+  # The Debug entry is a generator expression so that multi-config generators
+  # (Xcode, Ninja Multi-Config) get it for Debug installs as well.
+  if (OPENMS_USE_VCPKG AND VCPKG_INSTALLED_DIR AND VCPKG_TARGET_TRIPLET
+      AND "${PACKAGE_TYPE}" STREQUAL "none")
+    set(_vcpkg_triplet_dir "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}")
+    list(APPEND CMAKE_INSTALL_RPATH
+      "$<$<CONFIG:Debug>:${_vcpkg_triplet_dir}/debug/lib>"
+      "${_vcpkg_triplet_dir}/lib")
+    unset(_vcpkg_triplet_dir)
+  endif()
+endif()
+
+#------------------------------------------------------------------------------
+# lib naming when building with msvc & convenience location of build.bat
+# TODO only for msvc or generally on Windows?
+if (MSVC)
+	## use OpenMSd.dll etc. in debug mode
+    if(NOT DEFINED CMAKE_DEBUG_POSTFIX)
+        set(CMAKE_DEBUG_POSTFIX "d")
+    endif()
+    if(NOT ("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}"))
+        file(COPY "${PROJECT_SOURCE_DIR}/tools/build.bat" DESTINATION "${PROJECT_BINARY_DIR}")
+    endif()
+endif()
+
+
+# Find core dependencies here, so all projects have access to the same variables and
+# do not have to re-search for the core components
+
+## Defines openms_add_third_party_notice(), with which the code that installs third-party
+## license files (the Thermo bridge in cmake_findExternalLibs.cmake among it) records them
+## for share/OpenMS/THIRD-PARTY-NOTICES.txt.
+include(cmake/third_party_notices.cmake)
+if(OPENMS_USE_INSTALLED_LIBRARY)
+  include(cmake/find_installed_openms.cmake)
+else()
+  include(cmake/cmake_findExternalLibs.cmake)
+endif()
+
+#------------------------------------------------------------------------------
+# find the Doxygen (required by /doc and /src/OpenMS)
+## 'dot' (Graphviz) is requested as an OPTIONAL component: it is only needed by the opt-in
+## 'doc_dot' target (documentation with all dot graphs); the default documentation targets do
+## not run dot (HAVE_DOT = NO in doc/doxygen/Doxyfile.in). Provides the Doxygen::doxygen /
+## Doxygen::dot imported targets and the modern Doxygen_FOUND, Doxygen_VERSION,
+## Doxygen_dot_FOUND result variables.
+if(NOT OPENMS_USE_INSTALLED_LIBRARY)
+  find_package(Doxygen OPTIONAL_COMPONENTS dot)
+endif()
+
+if(WITH_ONNX AND NOT OPENMS_USE_INSTALLED_LIBRARY)
+  # 1. Tell CMake to look for the package ONLY if the switch is ON.
+  if(OPENMS_USE_VCPKG)
+    find_package(onnxruntime CONFIG REQUIRED)
+  else()
+    find_package(ONNXRuntime REQUIRED)
+  endif() 
+endif()
+
+
+## WITH_MIMALLOC (Windows, MSVC): the TOPP tools allocate through mimalloc; defines openms_link_mimalloc().
+include(cmake/mimalloc.cmake)
+
+#------------------------------------------------------------------------------
+# The actual OpenMS code (headers and source files)
+#------------------------------------------------------------------------------
+add_subdirectory(src)
+
+#------------------------------------------------------------------------------
+# Documentation
+#------------------------------------------------------------------------------
+if(NOT OPENMS_USE_INSTALLED_LIBRARY)
+  add_subdirectory(doc)
+endif()
+
+#------------------------------------------------------------------------------
+# Thirdparty search engines (shipped with the installers)
+#------------------------------------------------------------------------------
+set(SEARCH_ENGINES_DIRECTORY "" CACHE PATH "The location where thirdparty search engines (Comet, MSGF+, ...) are located. This directory should have the same structure as the search engine repository at https://github.com/OpenMS/THIRDPARTY after flattening for your platform.")
+
+#------------------------------------------------------------------------------
+# CWL generation (updates openms/share/commonwl/*.cwl files for all TOPP tools)
+#------------------------------------------------------------------------------
+if (ENABLE_CWL_GENERATION)
+  include(${OPENMS_HOST_DIRECTORY}/cmake/cwl_generation.cmake)
+endif()
+
+#------------------------------------------------------------------------------
+# Handle export of targets and install them
+## A build against an installed OpenMS library does not provide a CMake package: the
+## installation it builds on already does (OpenMSConfig.cmake), and a second one would
+## collide with it where the layers are installed into one prefix.
+if(NOT OPENMS_USE_INSTALLED_LIBRARY)
+  openms_export_targets()
+  install_export_targets()
+endif()
+
+#------------------------------------------------------------------------------
+# Installation and packaging:
+#------------------------------------------------------------------------------
+
+## Defines openms_install_third_party_licenses(), which package_general.cmake calls, and
+## openms_install_vendored_licenses() and openms_install_vcpkg_licenses(), which every
+## installation needs, the pyOpenMS wheels among them.
+include(cmake/third_party_licenses.cmake)
+## The libraries' licenses and THIRD-PARTY-NOTICES.txt come with the installation that a
+## build against an installed OpenMS library builds on.
+if(NOT OPENMS_USE_INSTALLED_LIBRARY)
+  openms_install_vendored_licenses()
+  openms_install_vcpkg_licenses()
+endif()
+
+if(NOT "${PACKAGE_TYPE}" STREQUAL "none")
+
+  # packaging routines:
+  include(cmake/package_general.cmake)
+  if("${PACKAGE_TYPE}" STREQUAL "dmg") # .. macOS dmg
+    set(CPACK_GENERATOR "DragNDrop")
+    include(cmake/package_dragndrop_dmg.cmake)
+  elseif("${PACKAGE_TYPE}" STREQUAL "pkg") # .. macOS pkg
+    set(CPACK_GENERATOR "productbuild")
+    include(cmake/package_mac_productbuild.cmake)
+  elseif("${PACKAGE_TYPE}" STREQUAL "rpm") # .. rpms
+    set(CPACK_GENERATOR "RPM")
+    include(cmake/package_rpm.cmake)
+  elseif("${PACKAGE_TYPE}" STREQUAL "deb") # .. debs
+    set(CPACK_GENERATOR "DEB")
+    include(cmake/package_deb.cmake)
+  elseif("${PACKAGE_TYPE}" STREQUAL "nsis") # .. Windows nsis
+    # For now we use the old NSIS script AS IS
+    # i.e. although CMake runs make install etc. NSIS
+    # will use everything from the usual build folder like before.
+    # TODO automate more and let CMake generate install commands
+    # in the script. Unfortunately we have a lot of specific code in the script.
+    set(CPACK_GENERATOR "NSIS")
+    include(cmake/package_nsis.cmake)
+  elseif("${PACKAGE_TYPE}" STREQUAL "zip")
+    if(NOT WIN32)
+      message(FATAL_ERROR "The package type ZIP is only supported for windows.")
+    endif()
+    set(CPACK_GENERATOR "ZIP")
+    # For now we use the package nsis script to ensure all dependencies
+    # are met for the portable version.
+    # TODO refactor this to only execute the relevant processing steps
+    include(cmake/package_nsis.cmake)
+  endif()
+  include(CPack)
+  include(cmake/package_components.cmake)
+endif()
+
+## share/OpenMS/THIRD-PARTY-NOTICES.txt, made from the license files recorded above. Last, so
+## that it covers all of them.
+if(NOT OPENMS_USE_INSTALLED_LIBRARY)
+  openms_install_third_party_notices()
+endif()
+
+#------------------------------------------------------------------------------
+# Some final messages for the users
+#------------------------------------------------------------------------------
+include(cmake/messages.cmake)
+
+message(STATUS "")
+message(STATUS "-----------------------------------------------------------------")
+message(STATUS "")
+message(STATUS "You have successfully configured OpenMS.")
+message(STATUS "")
+if (MSVC)
+  message(STATUS "Execute the 'targets' project to see prominent targets!")
+  message(STATUS "For faster loading see the individual solution files located in")
+  message(STATUS "the src/ and doc/ folder and their subfolders")
+  message(STATUS "  e.g., src/openms/OpenMS.sln")
+  message(STATUS "for the solution containing the OpenMS library.")
+else()
+  message(STATUS "For a full list of make targets execute:")
+  message(STATUS "'make targets'")
+endif()
+message(STATUS "")
+message(STATUS "-----------------------------------------------------------------")
+message(STATUS "")

@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+
+set -eu
+set -o pipefail
+
+# Parse command line arguments
+SKIP_DOC_DEPS=false
+SKIP_GUI_DEPS=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+  --skip-doc-deps)
+    SKIP_DOC_DEPS=true
+    shift
+    ;;
+  --skip-gui-deps)
+    SKIP_GUI_DEPS=true
+    shift
+    ;;
+  *)
+    echo "Unknown option: $1"
+    echo "Usage: $0 [--skip-doc-deps] [--skip-gui-deps]"
+    exit 1
+    ;;
+  esac
+done
+
+# Unfortunately GitHub's macOS runner already has Python installed so
+# we need to tell brew to overwrite the existing links.  The following
+# function will be called when the brew commands below are executed.
+# It then calls the real brew command.
+function brew() {
+  local action=$1
+  shift
+
+  # Bash on macOS doesn't allow using empty arrays.  Therefore we put
+  # the action name in the flags array so it always has at least one
+  # element.  This is also why we install bash below.
+  local -a flags=("$action")
+
+  if [ "$action" = "install" ]; then
+    flags+=("--overwrite")
+  fi
+
+  command brew "${flags[@]}" "$@"
+}
+
+# Code between the following doxygen markers are included in the
+# public-facing OpenMS installation instructions.
+
+# [installation_documentation]
+# Update the package index:
+brew update
+
+# Required dependencies:
+brew install \
+  bash \
+  bison \
+  dotnet \
+  flex \
+  icu4c \
+  libomp \
+  pkg-config \
+  ninja
+
+# libomp is the OpenMP runtime, which Apple's Clang does not ship. The formula is
+# keg-only: the macOS presets find it in /opt/homebrew/opt/libomp, other builds need
+# -DOpenMP_ROOT=$(brew --prefix libomp). Without it OpenMS runs single-threaded.
+
+# GUI dependencies (can be skipped for non-GUI builds):
+if [ "$SKIP_GUI_DEPS" = false ]; then
+  brew install qtbase qtsvg
+fi
+
+# Optional documentation dependencies:
+if [ "$SKIP_DOC_DEPS" = false ]; then
+  brew install \
+    doxygen
+fi
+
+# Graphviz is only needed for the optional 'doc_dot' target (documentation
+# with all dot graphs), so it is not installed here:
+#   brew install graphviz
+# [installation_documentation]
+
+# These are only needed in CI:
+brew install \
+  ccache \
+  rclone \
+  rsync

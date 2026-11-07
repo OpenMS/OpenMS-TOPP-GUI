@@ -1,0 +1,185 @@
+# Copyright (c) 2002-present, OpenMS Inc. -- EKU Tuebingen, ETH Zurich, and FU Berlin
+# SPDX-License-Identifier: BSD-3-Clause
+# 
+# --------------------------------------------------------------------------
+# $Maintainer: Julianus Pfeuffer $
+# $Authors: Julianus Pfeuffer $
+# --------------------------------------------------------------------------
+
+
+## Very useful for debugging purposes: Disables the dependency on the "make install" target.
+## In our case e.g. "make install" always builds the documentation etc. 
+#set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY On)
+
+# For info about this CPack generator and its capabilities, see the CMake documentation
+# For info about productbuild and the flat package format see https://matthew-brett.github.io/docosx/flat_packages.html
+
+# Set the install prefix before generating the plist (needed for RootRelativeBundlePath)
+set(CPACK_PACKAGING_INSTALL_PREFIX "/Applications/${CPACK_PACKAGE_NAME}-${OPENMS_PACKAGE_VERSION_FULLSTRING}")
+
+# Generate ApplicationsComponent.plist for CPack component
+# Variable APPLICATIONS_COMPONENT_PLIST is set by the included script and visible
+# to package_components.cmake since both are include()'d from the top-level CMakeLists.txt.
+include(${PROJECT_SOURCE_DIR}/cmake/generate_applications_component_plist.cmake)
+set(CPACK_PRODUCTBUILD_IDENTIFIER "de.openms")
+set(CPACK_PRODUCTBUILD_RESOURCES_DIR ${PROJECT_SOURCE_DIR}/cmake/MacOSX)
+set(CPACK_PRODUCTBUILD_BACKGROUND ${OPENMS_LOGOSMALL_NAME})
+set(CPACK_PRODUCTBUILD_BACKGROUND_ALIGNMENT "bottomleft")
+set(CPACK_PRODUCTBUILD_BACKGROUND_SCALING "none")
+
+# Allow installing to every Domain (https://gitlab.kitware.com/cmake/cmake/-/merge_requests/6825).
+set(CPACK_PRODUCTBUILD_DOMAINS TRUE) # system-wide
+set(CPACK_PRODUCTBUILD_DOMAINS_USER TRUE) # user folder
+
+# The installer refuses a macOS older than the deployment target, which package builds set
+# through MACOSX_DEPLOYMENT_TARGET (.github/actions/build/action.yml). The Distribution file
+# comes from cmake/Modules/CPack.distribution.dist.in: CPack looks for that template in
+# CMAKE_MODULE_PATH before its own, and ours is CMake's plus a <volume-check>, the only
+# parent Apple's Distribution XML reference allows for <allowed-os-versions>; its script
+# attribute is required. Setting CPACK_APPLE_PKG_INSTALLER_CONTENT instead does not work:
+# CPack generates that variable.
+# TODO the template could also declare hostArchitectures, which CMake does not support
+# (https://gitlab.kitware.com/cmake/cmake/-/issues/21734).
+# Single quotes: CPack copies CPACK_* values into CPackConfig.cmake without escaping them.
+if(CMAKE_OSX_DEPLOYMENT_TARGET)
+  set(CPACK_OPENMS_ALLOWED_OS_VERSIONS
+      "<volume-check script='true'><allowed-os-versions><os-version min='${CMAKE_OSX_DEPLOYMENT_TARGET}'/></allowed-os-versions></volume-check>")
+else()
+  set(CPACK_OPENMS_ALLOWED_OS_VERSIONS "")
+  message(WARNING "CMAKE_OSX_DEPLOYMENT_TARGET is not set, so the installer will not check the macOS version. Set MACOSX_DEPLOYMENT_TARGET to the macOS the build and its bundled libraries target.")
+endif()
+
+if(NOT DEFINED CPACK_PRODUCTBUILD_IDENTITY_NAME)
+  message(WARNING "CPACK_PRODUCTBUILD_IDENTITY_NAME not set. PKG will not be signed. Make sure to specify an identity with a Developer ID: Installer certificate (not Application certificate).")
+endif()
+
+set(MACOS_TARGET_ARCHS ${CMAKE_OSX_ARCHITECTURES})
+if (NOT MACOS_TARGET_ARCHS)
+  # Warning: if cmake is a subprocess of a process that is run under Rosetta, it will yield
+  #  x86_64 (but probably also build for it. Therefore it should be fine.)
+  set(MACOS_TARGET_ARCHS ${CMAKE_HOST_SYSTEM_PROCESSOR})
+endif()
+if (MACOS_TARGET_ARCHS STREQUAL "x86_64")
+  set(ARCH_SUFFIX "Intel")
+elseif (MACOS_TARGET_ARCHS STREQUAL "arm64")
+  set(ARCH_SUFFIX "Silicon")
+elseif ("x86_64" IN_LIST MACOS_TARGET_ARCHS AND "arm64" IN_LIST MACOS_TARGET_ARCHS)
+  set(ARCH_SUFFIX "Universal")
+else ()
+  set(ARCH_SUFFIX "Unknown")
+  message(WARNING "Couldn't determine MACOS_TARGET_ARCHS.")
+endif()
+
+if((DEFINED ENV{CPACK_PACKAGE_FILE_NAME}) AND (NOT "$ENV{CPACK_PACKAGE_FILE_NAME}" STREQUAL ""))
+  set(CPACK_PACKAGE_FILE_NAME "$ENV{CPACK_PACKAGE_FILE_NAME}")
+else()
+  set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${OPENMS_PACKAGE_VERSION_FULLSTRING}-macOS-${ARCH_SUFFIX}")
+endif()
+
+## Additionally install TOPPShell into root of install folder
+########################################################### TOPPShell
+install(FILES       ${PROJECT_SOURCE_DIR}/cmake/MacOSX/TOPP-shell.command
+        DESTINATION .
+        RENAME      "TOPP Shell"
+        PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
+                    GROUP_READ GROUP_EXECUTE
+                    WORLD_READ WORLD_EXECUTE
+        COMPONENT   TOPPShell)
+
+install(FILES       ${PROJECT_SOURCE_DIR}/cmake/MacOSX/TOPP_bash_profile
+        DESTINATION .
+        RENAME      .TOPP_bash_profile
+        PERMISSIONS OWNER_WRITE OWNER_READ
+                    GROUP_READ
+                    WORLD_READ
+        COMPONENT   TOPPShell)
+
+install(FILES       ${PROJECT_SOURCE_DIR}/cmake/MacOSX/README.md
+        DESTINATION .
+        PERMISSIONS OWNER_WRITE OWNER_READ
+                    GROUP_READ
+                    WORLD_READ
+        COMPONENT   TOPPShell)
+
+## bin/qt.conf, which ExecutePipeline needs to find the Qt platform plugin, is installed in
+## src/openms_gui/CMakeLists.txt.
+
+## Fix OpenMS dependencies for all executables in the install directory under bin.
+## That affects everything but the bundles (whose Framework folders are symlinked to lib anyway).
+########################################################### Fix Dependencies
+# Use --no-copy and assume CMake correctly collected all necessary libs already (therefore only fix links to dylibs)
+install(CODE "execute_process(COMMAND ${OPENMS_HOST_DIRECTORY}/cmake/MacOSX/fix_dependencies.rb -b \${CMAKE_INSTALL_PREFIX}/../../../Applications${CPACK_PACKAGING_INSTALL_PREFIX}/${INSTALL_BIN_DIR}/ -l \${CMAKE_INSTALL_PREFIX}/${INSTALL_LIB_DIR}/ -p \${CMAKE_INSTALL_PREFIX}/${INSTALL_PLUGIN_DIR} -e @rpath/ -n -c)"
+        COMPONENT Dependencies
+        )
+# We have to do signing after fixing, otherwise signature will be invalidated.
+# We have to choose COMPONENT Dependencies, otherwise it would be performed at the end of installing Applications, which
+# comes first (alphabetically per component, then order of install calls)
+# If the install CODE is not in the same component though, we need to navigate from the component specific install
+# prefix to the other prefix. This is unfortunately very unrobust.
+# TODO find better order or rewrite fix_dependencies script to be called separately
+install(CODE "
+        execute_process(COMMAND find \${CMAKE_INSTALL_PREFIX}/../../../Applications${CPACK_PACKAGING_INSTALL_PREFIX}/${INSTALL_BIN_DIR}/ -type f -execdir codesign --force --options runtime --timestamp -i de.openms.TOPP.{} --sign \"${CPACK_BUNDLE_APPLE_CERT_APP}\" {} \\; OUTPUT_VARIABLE topp_sign_out ERROR_VARIABLE topp_sign_out)
+        execute_process(COMMAND find \${CMAKE_INSTALL_PREFIX}/${INSTALL_LIB_DIR}/ -type f -execdir codesign --force --options runtime --timestamp -i de.openms.TOPP.libs.{} --sign \"${CPACK_BUNDLE_APPLE_CERT_APP}\" {} \\; OUTPUT_VARIABLE topp_sign_out ERROR_VARIABLE topp_sign_out)
+        message('\${topp_sign_out}')"
+        COMPONENT Dependencies
+        )
+## The libraries come in layered components (cmake/install_macros.cmake):
+## library, library_cli and library_gui. productbuild stages each component in
+## its own prefix, so each one fixes and signs the libraries it holds.
+set(_openms_library_components library library_cli)
+if(WITH_GUI)
+  list(APPEND _openms_library_components library_gui)
+endif()
+foreach(_library_component IN LISTS _openms_library_components)
+  install(CODE "execute_process(COMMAND ${OPENMS_HOST_DIRECTORY}/cmake/MacOSX/fix_dependencies.rb -l \${CMAKE_INSTALL_PREFIX}/${INSTALL_LIB_DIR}/ -e @rpath/ -n -c)"
+          COMPONENT ${_library_component}
+          )
+  install(CODE "
+          execute_process(COMMAND find \${CMAKE_INSTALL_PREFIX}/${INSTALL_LIB_DIR}/ -type f -execdir codesign --force --options runtime --timestamp -i de.openms.TOPP.libs.{} --sign \"${CPACK_BUNDLE_APPLE_CERT_APP}\" {} \\; OUTPUT_VARIABLE lib_sign_out ERROR_VARIABLE lib_sign_out)
+          message('\${lib_sign_out}')"
+          COMPONENT ${_library_component}
+          )
+endforeach()
+unset(_openms_library_components)
+
+## Sign thirdparty components
+foreach(component IN LISTS THIRDPARTY_COMPONENT_GROUP)
+  install(CODE "
+          if(EXISTS \${CMAKE_INSTALL_PREFIX}/${INSTALL_SHARE_DIR}/THIRDPARTY/${component}/)
+            execute_process(COMMAND find \${CMAKE_INSTALL_PREFIX}/${INSTALL_SHARE_DIR}/THIRDPARTY/${component}/ -type f -execdir codesign --force --options runtime --timestamp -i de.openms.thirdparty.${component}.{} --sign \"${CPACK_BUNDLE_APPLE_CERT_APP}\" {} \\; OUTPUT_VARIABLE thirdparty_sign_out ERROR_VARIABLE thirdparty_sign_out)
+            message('\${thirdparty_sign_out}')
+          endif()"
+          COMPONENT ${component}
+          )
+endforeach()
+
+## When Applications are installed (which is the FIRST in alphabetical order AND the main component),
+## a postinstall script runs to set file icon
+install(FILES       ${PROJECT_SOURCE_DIR}/cmake/MacOSX/openms_logo_large_transparent.png
+        DESTINATION .
+        COMPONENT   Applications)
+configure_file(${OPENMS_HOST_DIRECTORY}/cmake/MacOSX/setIcon.sh.in ${OPENMS_HOST_BINARY_DIRECTORY}/cmake/MacOSX/setIcon.sh)
+set(CPACK_POSTFLIGHT_APPLICATIONS_SCRIPT ${OPENMS_HOST_BINARY_DIRECTORY}/cmake/MacOSX/setIcon.sh)
+
+## The pyopenms Python extension modules (COMPONENT python_modules, see
+## src/pyOpenMS/CMakeLists.txt) are not meant to be bundled into the desktop
+## application installer - they are shipped separately as Python wheels (see
+## .github/workflows/pyopenms-wheels-cibuildwheel.yml). productbuild packages
+## every known component into its own sub-pkg by default, and since these were
+## never signed, notarization rejected the whole installer. Exclude them here
+## instead of signing them, so they no longer get packaged at all. This must
+## run after all install(... COMPONENT ...) calls in the project have been
+## processed, so it picks up every real component.
+get_cmake_property(CPACK_COMPONENTS_ALL COMPONENTS)
+list(REMOVE_ITEM CPACK_COMPONENTS_ALL python_modules)
+## Drop the class-test framework archive and its headers (dev tool, not product
+## payload). Both install rules are EXCLUDE_FROM_ALL, but productbuild enumerates
+## components explicitly and installs each one by name, which ignores that flag.
+list(REMOVE_ITEM CPACK_COMPONENTS_ALL OpenMSTestFramework OpenMSTestFramework_headers)
+
+## Create own target because you cannot "depend" on the internal target 'package'
+add_custom_target(dist
+  COMMAND cpack -G ${CPACK_GENERATOR}
+  COMMENT "Building ${CPACK_GENERATOR} package"
+)
+
