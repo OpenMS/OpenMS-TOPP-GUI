@@ -1,22 +1,110 @@
 name: "Release"
 
+# Builds, tests and packages the GUI layer on every platform, checks each package
+# by installing it on top of the OpenMS installer it belongs to, uploads the
+# packages to the archive server next to the OpenMS installers
+# (/OpenMSInstaller/<type>/<version>/, e.g. nightly/2026.11.07 or release/3.7.0)
+# and, for a tag vX.Y.Z, publishes a GitHub release.
+#
+# The OpenMS core the packages are built against: the tag vX.Y.Z of OpenMS for a
+# tag of this repository, otherwise the branch nightly (the commit of today's
+# OpenMS nightly installers), unless the input core_ref says otherwise. The smoke
+# test takes the OpenMS installer of the same version from the archive server
+# (release/X.Y.Z, or nightly/<date of this run>).
 on:
   workflow_dispatch:
     inputs:
       deploy:
         description: >-
-          Upload the installers, SDKs and documentation to the archive server and
-          publish a tagged release. Off, the workflow only builds and keeps its
-          artifacts on the run: a dry run of the release workflow on any branch.
+          Upload the packages to the archive server and publish a tagged release.
+          Off, the workflow only builds and keeps its artifacts on the run: a dry
+          run of the release workflow on any branch.
         type: boolean
         default: true
+      core_ref:
+        description: "Branch, tag or commit of OpenMS/OpenMS to build against (default: vX.Y.Z for a release, else nightly)"
+        type: string
+        default: ""
+      core_mode:
+        description: "Where the OpenMS core comes from: source, sdk, or empty for the default of the openms-core action"
+        type: string
+        default: ""
+  # used by nightly.yml for the nightly installers
+  workflow_call:
+    inputs:
+      deploy:
+        type: boolean
+        default: true
+      core_ref:
+        type: string
+        default: ""
+      core_mode:
+        type: string
+        default: ""
   push:
     tags:
       - 'v[0-9]*'
 
+permissions:
+  contents: read
+
 jobs:
+  version:
+    name: "Version"
+    runs-on: ubuntu-latest
+    outputs:
+      has_version: ${{ steps.version.outputs.has_version }}
+      version: ${{ steps.version.outputs.version }}
+      version_name: ${{ steps.version.outputs.name }}
+      version_type: ${{ steps.version.outputs.type }}
+      core_ref: ${{ steps.core.outputs.ref }}
+      core_channel: ${{ steps.core.outputs.channel }}
+      deploy: ${{ steps.core.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - name: Parse the Version Number
+        id: version
+        uses: ./.github/actions/version
+
+      - name: Choose the OpenMS Core
+        id: core
+        shell: bash
+        env:
+          CORE_REF: ${{ inputs.core_ref }}
+          TYPE: ${{ steps.version.outputs.type }}
+          EVENT: ${{ github.event_name }}
+          DEPLOY: ${{ inputs.deploy }}
+        run: |
+          # a tag of this repository is built against the same tag of OpenMS (a
+          # release or a release candidate), everything else against today's nightly
+          if [[ -z "$CORE_REF" ]]; then
+            if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+              CORE_REF=$GITHUB_REF_NAME
+            else
+              CORE_REF=nightly
+            fi
+          fi
+          # a push of a tag always deploys; otherwise the input decides
+          if [[ "$EVENT" == push || "$DEPLOY" == true ]]; then
+            deploy=true
+          else
+            deploy=false
+          fi
+          {
+            echo "ref=$CORE_REF"
+            # the folder of the OpenMS installers on the archive server: the channel
+            # is the version type (nightly, release, rc<N>), the folder the version
+            echo "channel=$TYPE"
+            echo "deploy=$deploy"
+          } | tee -a "$GITHUB_OUTPUT"
+
   build-and-test:
     name: "Build, Test, and Package"
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -31,66 +119,72 @@ jobs:
           - os: ubuntu-24.04-arm
             compiler: g++
     runs-on: ${{ matrix.os }}
-    outputs:
-      has_version: ${{ steps.version.outputs.has_version }}
-      version: ${{ steps.version.outputs.version }}
-      version_name: ${{ steps.version.outputs.name }}
-      version_type: ${{ steps.version.outputs.type }}
-      source_tarball: ${{ steps.source-name.outputs.tarball }}
 
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
-      # Some steps should only run for a single element of the build
-      # matrix.  This step computes which runner that is going to be.
-      - name: Compute Solo Runner
-        id: solo
-        shell: bash
-        run: |
-          if [[ "$RUNNER_OS" == "Linux" ]] && [[ "$RUNNER_ARCH" == "X64" ]]; then
-            echo "solo=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "solo=false" >>"$GITHUB_OUTPUT"
-          fi
-
-      - name: Build OpenMS
-        id: build-openms
-        uses: ./.github/actions/build
+      - name: Install Dependencies
+        id: deps
+        uses: ./.github/actions/dependencies
         with:
           compiler: ${{ matrix.compiler }}
+          doc: "true"
+
+      - name: Provide the OpenMS Core
+        id: core
+        uses: ./.github/actions/openms-core
+        with:
+          mode: ${{ inputs.core_mode }}
+          ref: ${{ needs.version.outputs.core_ref }}
+          exact: "true"
+          channel: ${{ needs.version.outputs.core_channel }}
+          version: ${{ needs.version.outputs.version }}
           ssh_key: ${{ secrets.ARCHIVE_RRSYNC_SSH }}
           ssh_host: ${{ secrets.ARCHIVE_RRSYNC_HOST }}
           ssh_port: ${{ secrets.ARCHIVE_RRSYNC_PORT }}
           ssh_user: ${{ secrets.ARCHIVE_RRSYNC_USER }}
 
-      - name: Parse the Version Number
-        id: version
-        uses: ./.github/actions/version
+      - name: Build and Test the GUI Layer
+        id: build
+        uses: ./.github/actions/build
+        with:
+          compiler: ${{ matrix.compiler }}
+          prefix_path: ${{ steps.core.outputs.prefix_path }};${{ steps.deps.outputs.cmake_prefix }}
+          topp_bin_dir: ${{ steps.core.outputs.bin_dir }}
+          examples_dir: ${{ steps.core.outputs.examples_dir }}
+          core_version_fullstring: ${{ steps.core.outputs.version_fullstring }}
+          # the packages include the documentation of the GUI tools (component doc_gui)
+          cmake_args: -DENABLE_DOCS=ON
 
-      # A release's tarball carries the plain version, the file name the
-      # Bioconda recipe downloads (OpenMS-<version>.tar.gz); any other build
-      # is named after its type, e.g. OpenMS-nightly-<date>.tar.gz.
-      - name: Name the Source Tarball
-        id: source-name
+      # A failure here does not stop the release: the packages are then made without
+      # the documentation (component doc_gui installs only what was built).
+      - name: Build the Documentation
+        id: doc
+        continue-on-error: true
         shell: bash
         env:
-          HAS_VERSION: ${{ steps.version.outputs.has_version }}
-          VERSION: ${{ steps.version.outputs.version }}
-          VERSION_NAME: ${{ steps.version.outputs.name }}
-        run: |
-          if [[ "$HAS_VERSION" == "true" ]]; then
-            echo "tarball=OpenMS-${VERSION}.tar.gz" >>"$GITHUB_OUTPUT"
-          else
-            echo "tarball=OpenMS-${VERSION_NAME}.tar.gz" >>"$GITHUB_OUTPUT"
-          fi
+          PRESET: ${{ steps.build.outputs.preset }}
+        run: cmake --build "build/$PRESET" --target doc
+
+      - name: Report a Failed Documentation Build
+        if: steps.doc.outcome == 'failure'
+        shell: bash
+        run: echo "::warning::The documentation could not be built; the packages of ${{ runner.os }} ${{ runner.arch }} do not contain it."
+
+      # One copy of the html for the archive (deploy-docs below).
+      - name: Upload the Documentation
+        if: steps.doc.outcome == 'success' && runner.os == 'Linux' && runner.arch == 'X64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: documentation-gui
+          path: build/${{ steps.build.outputs.preset }}/doc/html-gui
 
       - name: Compute Package Type
         id: package-info
         shell: bash
         run: |
-          # Why can't CMake do this?
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             echo "type=deb" >>"$GITHUB_OUTPUT"
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
@@ -105,6 +199,7 @@ jobs:
       - name: Import Apple Developer Certificates
         id: apple-certs
         if: runner.os == 'macOS'
+        shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERT }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_PASSWORD }}
@@ -113,8 +208,8 @@ jobs:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           if [[ -n "$APPLE_CERTIFICATE" ]]; then
-            echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
-            echo $INSTALLER_CERTIFICATE | base64 --decode > installer_certificate.p12
+            echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+            echo "$INSTALLER_CERTIFICATE" | base64 --decode > installer_certificate.p12
             security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
             security list-keychains -d user -s build.keychain
             security default-keychain -s build.keychain
@@ -123,6 +218,7 @@ jobs:
             security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild
             security import installer_certificate.p12 -k build.keychain -P "$INSTALLER_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productsign -T /usr/bin/productbuild
             security set-key-partition-list -S apple-tool:,apple:,codesign:,productsign:,productbuild: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+            rm -f certificate.p12 installer_certificate.p12
 
             echo "=== Available signing identities ==="
             security find-identity -v -p codesigning build.keychain
@@ -134,21 +230,22 @@ jobs:
       - name: Package
         shell: bash
         env:
-            PACKAGE_TYPE: ${{ steps.package-info.outputs.type }}
-            HAVE_APPLE_CERT: ${{ runner.os == 'macOS' && steps.apple-certs.outputs.has_cert }}
-            SIGNING_IDENTITY: "Developer ID Application: OpenMS Inc. (C64UCGJ5PL)"
-            SIGNING_EMAIL: "apple@openms.de"
-            CPACK_PRODUCTBUILD_IDENTITY_NAME: "Developer ID Installer: OpenMS Inc. (C64UCGJ5PL)"
-            PRESET: ${{ steps.build-openms.outputs.preset }}
+          PACKAGE_TYPE: ${{ steps.package-info.outputs.type }}
+          HAVE_APPLE_CERT: ${{ runner.os == 'macOS' && steps.apple-certs.outputs.has_cert }}
+          SIGNING_IDENTITY: "Developer ID Application: OpenMS Inc. (C64UCGJ5PL)"
+          SIGNING_EMAIL: "apple@openms.de"
+          CPACK_PRODUCTBUILD_IDENTITY_NAME: "Developer ID Installer: OpenMS Inc. (C64UCGJ5PL)"
+          PRESET: ${{ steps.build.outputs.preset }}
+          MACOSX_DEPLOYMENT_TARGET: "15.0"
         run: |
-          cd "build/$PRESET" || exit 1
+          set -euo pipefail
+          build_dir="$GITHUB_WORKSPACE/build/$PRESET"
 
           cmake_options=(
             "-DPACKAGE_TYPE=$PACKAGE_TYPE"
-            "-DSEARCH_ENGINES_DIRECTORY=$GITHUB_WORKSPACE/_thirdparty"
           )
 
-          if [[ -n "$HAVE_APPLE_CERT" ]] && [[ "$HAVE_APPLE_CERT" == "true" ]]; then
+          if [[ "$HAVE_APPLE_CERT" == "true" ]]; then
             cmake_options+=(
               "-DSIGNING_IDENTITY=$SIGNING_IDENTITY"
               "-DSIGNING_EMAIL=$SIGNING_EMAIL"
@@ -156,52 +253,44 @@ jobs:
             )
           fi
 
-          # makensis.exe opens every staged file (including the Doxygen HTML
-          # docs) through the plain Win32 file APIs, which are bound by
-          # MAX_PATH (260 chars). Deeply-mangled template filenames in the
-          # docs (e.g. GridSearch's nested Looper struct) combined with
-          # CPack's default staging path under this already-long build
-          # directory push some files past that limit and abort the NSIS
-          # build. Stage the CPack package build in a short, fixed directory
-          # on Windows instead, so the full staged path stays well under
-          # MAX_PATH; the resulting installer is moved back next to the
-          # other build output below so later steps don't need to know.
-          WIN_CPACK_STAGE_DIR="C:/cpk"
+          # makensis.exe opens every staged file through the Win32 file APIs, which
+          # are bound by MAX_PATH (260 characters). CPack stages below the build
+          # directory by default; a short, fixed staging directory keeps the paths
+          # well below the limit. The installer is moved back next to the other
+          # build output below.
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             rm -rf "/c/cpk"
             mkdir -p "/c/cpk"
-            cmake_options+=("-DCPACK_PACKAGE_DIRECTORY=$WIN_CPACK_STAGE_DIR")
+            cmake_options+=("-DCPACK_PACKAGE_DIRECTORY=C:/cpk")
           fi
 
-          cmake "${cmake_options[@]}" ../..
+          cmake "${cmake_options[@]}" "$build_dir"
 
-          if ! ninja dist; then
+          if ! cmake --build "$build_dir" --target dist; then
             if [[ "$RUNNER_OS" == "Windows" ]]; then
-              cat /c/cpk/_CPack_Packages/win64/NSIS/NSISOutput.log
+              cat /c/cpk/_CPack_Packages/win64/NSIS/NSISOutput.log || true
             fi
-
             exit 1
           fi
 
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            mv /c/cpk/*.exe .
+            mv /c/cpk/*.exe "$build_dir/"
           fi
+          ls -l "$build_dir"/*.exe "$build_dir"/*.deb "$build_dir"/*.pkg 2>/dev/null || true
 
-      # Notarize macOS packages for Gatekeeper approval
-      # This step submits the signed package to Apple for notarization and staples the ticket
+      # Submits the signed package to Apple for notarization and staples the ticket.
       - name: Notarize macOS Package
         if: runner.os == 'macOS' && steps.apple-certs.outputs.has_cert == 'true'
         shell: bash
         env:
           APPLE_APP_SPECIFIC_NOTARIZATION_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_NOTARIZATION_PASSWORD }}
           TEAM_ID: "C64UCGJ5PL"
-          PRESET: ${{ steps.build-openms.outputs.preset }}
+          PRESET: ${{ steps.build.outputs.preset }}
         run: |
           echo "=== Starting macOS package notarization ==="
           cd "build/$PRESET"
 
-          # Find the generated .pkg file
-          PKG_FILE=$(ls -1 *.pkg 2>/dev/null | head -1)
+          PKG_FILE=$(find . -maxdepth 1 -name 'OpenMS-GUI-*.pkg' | head -n 1)
           if [[ -z "$PKG_FILE" ]]; then
             echo "Error: No .pkg file found in build directory"
             ls -la
@@ -210,10 +299,9 @@ jobs:
 
           echo "Found package: $PKG_FILE"
 
-          # Run notarization script
-          $GITHUB_WORKSPACE/cmake/MacOSX/notarize.sh \
+          "$GITHUB_WORKSPACE/cmake/MacOSX/notarize.sh" \
             "$PKG_FILE" \
-            "de.openms" \
+            "de.openms.gui" \
             "apple@openms.de" \
             "APPLE_APP_SPECIFIC_NOTARIZATION_PASSWORD" \
             "$TEAM_ID" \
@@ -221,7 +309,6 @@ jobs:
 
           echo "=== Notarization complete ==="
 
-          # Verify the notarization
           echo "=== Verifying package signing and notarization ==="
           pkgutil --check-signature "$PKG_FILE" || echo "Warning: pkgutil verification returned non-zero"
           spctl -a -vvv -t install "$PKG_FILE" || echo "Warning: spctl assessment returned non-zero"
@@ -229,194 +316,124 @@ jobs:
       - name: Upload Packages as Artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ format('installer-{0}-{1}-{2}', steps.version.outputs.name, runner.os, runner.arch) }}
-          path: |
-            ${{ github.workspace }}/build/${{ steps.build-openms.outputs.preset }}/*.exe
-            ${{ github.workspace }}/build/${{ steps.build-openms.outputs.preset }}/*.deb
-            ${{ github.workspace }}/build/${{ steps.build-openms.outputs.preset }}/*.pkg
-
-      # The developer SDK (libraries, headers, CMake package, shared data and the
-      # bundled dependencies) is installed from the tree the installer was just
-      # packaged from, then checked by building src/tests/external against the
-      # extracted archive. See tools/ci/package_sdk.sh.
-      - name: Install SDK Packaging Tools
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends patchelf
-
-      - name: Package the Developer SDK
-        shell: bash
-        env:
-          PRESET: ${{ steps.build-openms.outputs.preset }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          bash tools/ci/package_sdk.sh "build/$PRESET" "$VERSION" "$RUNNER_TEMP/sdk"
-
-      - name: Upload the Developer SDK as an Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ format('sdk-{0}-{1}-{2}', steps.version.outputs.name, runner.os, runner.arch) }}
+          name: ${{ format('installer-{0}-{1}-{2}', needs.version.outputs.version_name, runner.os, runner.arch) }}
           if-no-files-found: error
           path: |
-            ${{ runner.temp }}/sdk/*.tar.gz
-            ${{ runner.temp }}/sdk/*.zip
+            ${{ github.workspace }}/build/${{ steps.build.outputs.preset }}/OpenMS-GUI-*.exe
+            ${{ github.workspace }}/build/${{ steps.build.outputs.preset }}/OpenMS-GUI-*.deb
+            ${{ github.workspace }}/build/${{ steps.build.outputs.preset }}/OpenMS-GUI-*.pkg
 
-      # Zip the documentation first, since there are :: which make the
-      # upload action choke.
-      - name: Zip Documentation
-        if: steps.solo.outputs.solo == 'true'
-        uses: thedoctor0/zip-release@0.7.6
-        with:
-          type: 'zip'
-          directory: ${{ github.workspace }}/build/${{ steps.build-openms.outputs.preset }}/doc
-          exclusions: '/CMakeFiles/* /doxygen/* /code_examples/*'
-          filename: 'documentation.zip'
-
-      - name: Upload Documentation as artifacts
-        if: steps.solo.outputs.solo == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: documentation
-          path: |
-            ${{ github.workspace }}/build/${{ steps.build-openms.outputs.preset }}/doc/documentation.zip
-
-      - name: Create a tarball of the Source Code
-        if: steps.solo.outputs.solo == 'true'
-        env:
-          TARBALL: ${{ steps.source-name.outputs.tarball }}
-        run: |
-          # git archive packs the files of the commit and nothing else from the
-          # workspace, where the build leaves build/, its caches (.ccache,
-          # .vcpkg-cache), the third-party tools (_thirdparty) and test output.
-          # It also fills in .git_archival.txt (export-subst): the tarball has no
-          # .git, so CMake takes the commit from there, and for the tag v<version>
-          # the plain version.
-          # Left out are .github and the submodules THIRDPARTY and vcpkg, which git
-          # archive would add as empty directories. vcpkg.json,
-          # vcpkg-configuration.json and vcpkg-overlays/ (overlay ports and
-          # triplets) are shipped, so the tarball builds with an external vcpkg
-          # (-DOPENMS_USE_VCPKG=ON
-          # -DCMAKE_TOOLCHAIN_FILE=<vcpkg root>/scripts/buildsystems/vcpkg.cmake)
-          # as well as against system packages (the default, OPENMS_USE_VCPKG=OFF).
-          git -C "$GITHUB_WORKSPACE" archive --format=tar.gz \
-            --output="$RUNNER_TEMP/$TARBALL" HEAD -- \
-            . ':(exclude).github' ':(exclude)THIRDPARTY' ':(exclude)vcpkg'
-
-      - name: Upload Source Code as an Artifact
-        if: steps.solo.outputs.solo == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ steps.source-name.outputs.tarball }}
-          path: |
-            ${{ runner.temp }}/${{ steps.source-name.outputs.tarball }}
-
-  # The vcpkg dependencies of the Debug SDK, on their own first. The triplet
-  # x64-windows-static-md builds every port in both configurations, and the first
-  # run of a new binary cache builds them all from source (3 h 20 min in a dry
-  # run, ONNX Runtime alone 54 min); the cache is uploaded only by a job that
-  # succeeds. One job that went on to build OpenMS in Debug would run close to
-  # the 6-hour limit and lose the dependencies with every failure, so this job
-  # stops after configuring. With a warm cache it is a matter of minutes.
-  build-windows-debug-deps:
-    name: "Build the Windows Debug SDK dependencies"
-    runs-on: windows-2025
-    # the suffix of this build's cache keys, static so that the post step that
-    # uploads the vcpkg cache sees it (an input would evaluate to its default
-    # there; see .github/actions/build/action.yml)
+  # Installs each package the way users do: the OpenMS installer of the same
+  # version first, then the GUI package into its installation, and starts the GUI
+  # tools without a display.
+  smoke-test:
+    name: "Smoke Test the Package"
+    needs:
+      - version
+      - build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-15, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
     env:
-      OPENMS_CACHE_KEY_SUFFIX: -windows-x64-debug-ci
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v6
         with:
+          sparse-checkout: .github/actions
           persist-credentials: false
 
-      - name: Configure OpenMS (Debug)
-        uses: ./.github/actions/build
+      - name: Download the Package
+        uses: actions/download-artifact@v8
         with:
-          compiler: cl.exe
-          preset: windows-x64-debug-ci
-          configure_only: "true"
-          ssh_key: ${{ secrets.ARCHIVE_RRSYNC_SSH }}
-          ssh_host: ${{ secrets.ARCHIVE_RRSYNC_HOST }}
-          ssh_port: ${{ secrets.ARCHIVE_RRSYNC_PORT }}
-          ssh_user: ${{ secrets.ARCHIVE_RRSYNC_USER }}
+          name: ${{ format('installer-{0}-{1}-{2}', needs.version.outputs.version_name, runner.os, runner.arch) }}
+          path: ${{ runner.temp }}/gui-package
 
-  # The Windows Debug SDK: MSVC's debug CRT (/MDd) is not compatible with the
-  # release one, so a Debug build of a consumer cannot link the Release SDK. This
-  # job builds the libraries once more in Debug, with the vcpkg dependencies in
-  # their debug form, and packages only the SDK: no installer, no tests (the
-  # Release job covers them, and the Debug test suite would take many hours).
-  # The installer upload and the release wait for it but do not need it: no PR
-  # check builds the Debug halves of the vcpkg ports, so a port that breaks only
-  # in Debug would otherwise hold them back. When this job or the one before it
-  # fails, they go ahead without the Debug SDK.
-  build-windows-debug-sdk:
-    name: "Build the Windows Debug SDK"
-    runs-on: windows-2025
-    # the suffix of this build's cache keys, static so that the post step that
-    # uploads the vcpkg cache sees it (an input would evaluate to its default
-    # there; see .github/actions/build/action.yml)
-    env:
-      OPENMS_CACHE_KEY_SUFFIX: -windows-x64-debug-ci
-    needs: build-windows-debug-deps
-    steps:
-      - uses: actions/checkout@v6
+      - name: Install the OpenMS Installer
+        id: core
+        uses: ./.github/actions/openms-core
         with:
-          persist-credentials: false
+          mode: sdk
+          sdk: "false"
+          channel: ${{ needs.version.outputs.core_channel }}
+          version: ${{ needs.version.outputs.version }}
 
-      - name: Build OpenMS (Debug)
-        id: build-openms
-        uses: ./.github/actions/build
-        with:
-          compiler: cl.exe
-          preset: windows-x64-debug-ci
-          run_tests: "false"
-          ssh_key: ${{ secrets.ARCHIVE_RRSYNC_SSH }}
-          ssh_host: ${{ secrets.ARCHIVE_RRSYNC_HOST }}
-          ssh_port: ${{ secrets.ARCHIVE_RRSYNC_PORT }}
-          ssh_user: ${{ secrets.ARCHIVE_RRSYNC_USER }}
-
-      - name: Parse the Version Number
-        id: version
-        uses: ./.github/actions/version
-
-      # The Dependencies component the SDK installs exists only in a tree
-      # configured with a PACKAGE_TYPE, as the installer job's is. The build
-      # afterwards is a no-op unless the reconfigure changed something.
-      - name: Configure the Package Type
+      # An OpenMS installer from before the split ships the GUI tools itself; the
+      # GUI package cannot be installed on top of it.
+      - name: Check the OpenMS Installation
+        id: presplit
         shell: bash
         env:
-          PRESET: ${{ steps.build-openms.outputs.preset }}
+          INSTALL_DIR: ${{ steps.core.outputs.install_dir }}
         run: |
-          cmake -DPACKAGE_TYPE=nsis "-DSEARCH_ENGINES_DIRECTORY=$GITHUB_WORKSPACE/_thirdparty" "build/$PRESET"
-          cmake --build "build/$PRESET"
+          if [[ -e "$INSTALL_DIR/bin/TOPPView" || -e "$INSTALL_DIR/bin/TOPPView.exe" || -e "$INSTALL_DIR/bin/TOPPView.app" ]]; then
+            echo "::warning::The OpenMS installer still contains the GUI tools (an OpenMS from before the split); the smoke test of the GUI package is skipped."
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >>"$GITHUB_OUTPUT"
+          fi
 
-      - name: Package the Developer SDK
+      - name: Install the GUI Package (Linux)
+        if: runner.os == 'Linux' && steps.presplit.outputs.skip == 'false'
+        shell: bash
+        run: |
+          sudo apt-get -qq install -y --no-install-recommends "$RUNNER_TEMP"/gui-package/OpenMS-GUI-*.deb
+
+      - name: Install the GUI Package (macOS)
+        if: runner.os == 'macOS' && steps.presplit.outputs.skip == 'false'
+        shell: bash
+        run: |
+          for pkg in "$RUNNER_TEMP"/gui-package/OpenMS-GUI-*.pkg; do
+            sudo installer -pkg "$pkg" -target /
+          done
+
+      # The add-on installer finds the OpenMS installation in the registry.
+      - name: Install the GUI Package (Windows)
+        if: runner.os == 'Windows' && steps.presplit.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "$env:RUNNER_TEMP\gui-package\OpenMS-GUI-*.exe" | Select-Object -First 1
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "The GUI installer failed with exit code $($p.ExitCode)" }
+
+      - name: Run the GUI Tools
+        if: steps.presplit.outputs.skip == 'false'
         shell: bash
         env:
-          PRESET: ${{ steps.build-openms.outputs.preset }}
-          VERSION: ${{ steps.version.outputs.version }}
+          INSTALL_DIR: ${{ steps.core.outputs.install_dir }}
         run: |
-          bash tools/ci/package_sdk.sh "build/$PRESET" "$VERSION" "$RUNNER_TEMP/sdk"
-
-      - name: Upload the Developer SDK as an Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ format('sdk-{0}-{1}-{2}-Debug', steps.version.outputs.name, runner.os, runner.arch) }}
-          if-no-files-found: error
-          path: |
-            ${{ runner.temp }}/sdk/*.zip
+          set -euo pipefail
+          bin="$INSTALL_DIR/bin"
+          # the executables of the GUI applications (inside the bundles on macOS)
+          app() {
+            local candidate
+            for candidate in "$bin/$1.app/Contents/MacOS/$1" "$bin/$1.exe" "$bin/$1"; do
+              if [[ -f "$candidate" ]]; then
+                echo "$candidate"
+                return
+              fi
+            done
+            echo >&2 "ERROR: $1 is not installed in $bin"
+            ls -l "$bin" >&2
+            return 1
+          }
+          for tool in TOPPView ExecutePipeline; do
+            exe=$(app "$tool")
+            echo "=== $exe --help"
+            "$exe" --help
+          done
+          # the GUI TOPP tools are registered next to those of OpenMS
+          "$(app FileInfo)" --help >/dev/null
 
   deploy-installer:
     name: "Deploy Installer"
-    # !cancelled(): run after the Debug SDK job also when it failed (see there)
-    if: ${{ !cancelled() && needs.build-and-test.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.deploy) }}
+    if: ${{ needs.version.outputs.deploy == 'true' }}
     runs-on: ubuntu-latest
     needs:
+      - version
       - build-and-test
-      - build-windows-debug-sdk
+      - smoke-test
     steps:
       - uses: actions/checkout@v6
         with:
@@ -430,14 +447,9 @@ jobs:
           merge-multiple: true
           path: ${{ github.workspace }}/downloads
 
-      - name: Download the Developer SDK
-        uses: actions/download-artifact@v8
-        with:
-          pattern: sdk-*
-          merge-multiple: true
-          path: ${{ github.workspace }}/downloads
-
-      - name: Upload Installer and Mark as Latest
+      # Into the folder of the OpenMS installers of the same version. The 'latest'
+      # link of that folder belongs to OpenMS and is not touched.
+      - name: Upload Installer
         uses: ./.github/actions/rsync
         with:
           key: ${{ secrets.ARCHIVE_RRSYNC_SSH }}
@@ -445,18 +457,20 @@ jobs:
           host: ${{ secrets.ARCHIVE_RRSYNC_HOST }}
           port: ${{ secrets.ARCHIVE_RRSYNC_PORT }}
           src: ${{ github.workspace }}/downloads/*
-          dst: /OpenMSInstaller/${{ needs.build-and-test.outputs.version_type }}/${{ needs.build-and-test.outputs.version }}
-          latest: ${{ needs.build-and-test.outputs.version }}
-          # The archive has no OpenMSInstaller/release/ yet, and rsync creates only
-          # the last directory of dst by itself. A nightly's dated folder sits
-          # below the existing nightly/, so nightlies keep running without it.
-          mkpath: ${{ needs.build-and-test.outputs.has_version }}
+          dst: /OpenMSInstaller/${{ needs.version.outputs.version_type }}/${{ needs.version.outputs.version }}
+          # rsync creates only the last directory of dst by itself; the folder of
+          # a release exists if OpenMS published its installers first, the
+          # nightly/ folder exists anyway
+          mkpath: ${{ needs.version.outputs.has_version }}
 
+  # Next to the html of OpenMS of the same version: /Documentation/<type>/<version>/html-gui.
+  # The GUI applications link there (Help menu) when no local documentation is installed.
   deploy-docs:
     name: "Deploy Documentation"
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy }}
+    if: ${{ needs.version.outputs.deploy == 'true' }}
     runs-on: ubuntu-latest
     needs:
+      - version
       - build-and-test
     steps:
       - uses: actions/checkout@v6
@@ -465,198 +479,75 @@ jobs:
           persist-credentials: false
 
       - name: Download the Documentation
+        id: download
+        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
-          name: documentation
-          path: ${{ github.workspace }}/downloads
+          name: documentation-gui
+          path: ${{ github.workspace }}/html-gui
 
-      - name: Unzip the Documentation
-        shell: bash
-        run: |
-          unzip \
-            "$GITHUB_WORKSPACE/downloads/documentation.zip" \
-            -d "$GITHUB_WORKSPACE/downloads"
-
-          rm "$GITHUB_WORKSPACE/downloads/documentation.zip"
-
-      - name: Upload Documentation and Mark as Latest
+      - name: Upload Documentation
+        if: steps.download.outcome == 'success'
         uses: ./.github/actions/rsync
         with:
           key: ${{ secrets.ARCHIVE_RRSYNC_SSH }}
           user: ${{ secrets.ARCHIVE_RRSYNC_USER }}
           host: ${{ secrets.ARCHIVE_RRSYNC_HOST }}
           port: ${{ secrets.ARCHIVE_RRSYNC_PORT }}
-          src: ${{ github.workspace }}/downloads/
-          dst: /Documentation/${{ needs.build-and-test.outputs.version_type }}/${{ needs.build-and-test.outputs.version }}
-          latest: ${{ needs.build-and-test.outputs.version }}
+          src: ${{ github.workspace }}/html-gui
+          dst: /Documentation/${{ needs.version.outputs.version_type }}/${{ needs.version.outputs.version }}
+          mkpath: ${{ needs.version.outputs.has_version }}
 
   publish-release:
     name: "Publish Release"
-    if: ${{ !cancelled() && needs.deploy-installer.result == 'success' && needs.deploy-docs.result == 'success' }}
+    if: ${{ needs.version.outputs.has_version == 'true' && needs.version.outputs.deploy == 'true' }}
     runs-on: ubuntu-latest
-    permissions: write-all
+    permissions:
+      contents: write
     needs:
-      - build-and-test
-      - build-windows-debug-sdk
+      - version
       - deploy-installer
-      - deploy-docs
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
           sparse-checkout: |
-            .github/workflows/release-announcement.txt
             CHANGELOG
 
-      - name: Create Change Log
+      # The section of this version in the CHANGELOG: from its banner
+      # ("----  OpenMS-TOPP-GUI X.Y.Z ...") to the banner of the previous release.
+      - name: Create Release Notes
         env:
-          VERSION: ${{ needs.build-and-test.outputs.version }}
-          VERSION_TYPE: ${{ needs.build-and-test.outputs.version_type }}
+          VERSION: ${{ needs.version.outputs.version }}
         shell: bash
         run: |
-          # Return lines matching releases.
-          function releases() {
-            grep --line-number -- "----[[:space:]]*OpenMS" CHANGELOG
-          }
-
-          # Return the two lines matching the current release.
-          function this_version() {
-            grep --fixed-strings -A1 "$VERSION"
-          }
-
-          # Return line numbers from grep output
-          function line_numbers() {
-            cut --delimiter=: --fields=1
-          }
-
-          # Line numbers delimiting releases.
-          lines=()
-
-          if releases | this_version >/dev/null; then
-            # We have a matching release.
-            mapfile lines < <(releases | this_version | line_numbers)
-          else
-            # Use the latest release info instead.
-            mapfile lines < <(releases | head -n 2 | line_numbers)
-          fi
-
-          beg=$((lines[0] + 2))
-          end=$((lines[1] - 2))
-
-          sed --quiet -e "${beg},${end} p" CHANGELOG >release-changelog.txt
-
-      - name: Upload CHANGELOG as Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: changelog.txt
-          path: release-changelog.txt
-          archive: false
-
-      - name: Generate Release Announcement
-        env:
-          VERSION: ${{ needs.build-and-test.outputs.version }}
-          VERSION_TYPE: ${{ needs.build-and-test.outputs.version_type }}
-        shell: bash
-        run: |
-          # Fill the template with the version and the CHANGELOG section in file $1.
-          # Okay, maybe this is over the top.
-          function render() {
-          awk \
-            --assign VERSION_TYPE="$VERSION_TYPE" \
-            --assign VERSION="$VERSION" \
-            --assign CHANGELOG_FILE="$1" \
-            --source '
-              BEGIN {
-                cl_text = ""
-                while ((getline line < CHANGELOG_FILE) > 0) {
-                  cl_text = cl_text (cl_text ? ORS : "") line
-                }
-                close(CHANGELOG_FILE)
-              } {
-                line = $0
-
-                while (match(line, /@@([A-Z_]+)@@/, matches)) {
-                  alt = "MISSING"
-
-                  switch(matches[1]) {
-                  case "VERSION_TYPE":
-                    alt = VERSION_TYPE
-                    break
-                  case "VERSION":
-                    alt = VERSION
-                    break
-                  case "CHANGELOG":
-                    alt = cl_text
-                    break
-                  default:
-                    alt = "MISSING"
-                    break;
-                  }
-
-                  line = substr(line, 1, RSTART - 1) alt substr(line, RSTART + RLENGTH)
-                }
-
-                print line
-              }' <.github/workflows/release-announcement.txt
-          }
-
-          # The full announcement, for the website.
-          render release-changelog.txt >release-announcement.txt
-
-          # GitHub keeps only the first 125,000 characters of a release body, and the
-          # 3.6.0 announcement was longer: its notes stopped mid-word and lost "Known
-          # issues". If the announcement is too long, the release notes keep the
-          # introduction and "Known issues" (moved up), then as many whole sections as
-          # fit, and link the full CHANGELOG for the rest.
           python3 - <<'EOF'
           import os
           import re
 
-          LIMIT = 124000  # characters; GitHub's limit is 125,000
-
-          with open("release-changelog.txt", encoding="utf-8") as f:
-              changelog = f.read()
-          with open("release-announcement.txt", encoding="utf-8") as f:
-              announcement = f.read()
-
-          notes = changelog
-          if len(announcement) > LIMIT:
-              # Sections start with a heading line such as "General:" or "Known issues:".
-              parts = re.split(r"(?m)^(?=[A-Z][^\n]{0,40}:[ \t]*$)", changelog)
-              intro, sections = parts[0], parts[1:]
-              known = [s for s in sections if s.startswith("Known issues:")]
-              others = [s for s in sections if not s.startswith("Known issues:")]
-              url = "{}/{}/blob/{}/CHANGELOG".format(
-                  os.environ["GITHUB_SERVER_URL"], os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_REF_NAME"])
-              # room for the template around the CHANGELOG section and for the note below
-              budget = LIMIT - (len(announcement) - len(changelog)) - 1000
-              budget -= len(intro) + sum(len(s) for s in known)
-              kept, omitted = [], []
-              for s in others:
-                  if not omitted and len(s) <= budget:
-                      kept.append(s)
-                      budget -= len(s)
-                  else:
-                      omitted.append(s.split("\n", 1)[0].strip().rstrip(":"))
-              notes = (intro + "".join(known) + "".join(kept)
-                       + "Not shown here because of GitHub's length limit for release notes: "
-                       + ", ".join(omitted) + ". The complete list of changes is in the CHANGELOG, "
-                       + url + "\n")
-
-          with open("release-notes-changelog.txt", "w", encoding="utf-8") as f:
-              f.write(notes)
+          version = os.environ["VERSION"]
+          lines = open("CHANGELOG", encoding="utf-8").read().splitlines()
+          banners = [i for i, l in enumerate(lines) if re.match(r"^----\s+OpenMS-TOPP-GUI\s+\S+", l)]
+          start = next((i for i in banners
+                        if re.match(r"^----\s+OpenMS-TOPP-GUI\s+" + re.escape(version) + r"\b", lines[i])), None)
+          if start is None:
+              raise SystemExit(f"CHANGELOG has no section for OpenMS-TOPP-GUI {version}")
+          # the body starts after the closing line of dashes of the banner
+          body = start + 1
+          while body < len(lines) and lines[body].startswith("----"):
+              body += 1
+          # and ends before the opening line of dashes of the next banner
+          later = [i for i in banners if i > start]
+          end = later[0] - 1 if later else len(lines)
+          while end > body and not lines[end - 1].strip("- "):
+              end -= 1
+          notes = "\n".join(lines[body:end]).strip("\n")
+          header = (f"OpenMS-TOPP-GUI {version}, the graphical tools of OpenMS (TOPPView, TOPPAS, "
+                    f"INIFileEditor). Install it on top of OpenMS {version}: the packages are add-ons "
+                    f"to the OpenMS installers of the same version.\n\n")
+          open("release-notes.txt", "w", encoding="utf-8").write(header + notes + "\n")
           EOF
-
-          # The release notes on GitHub.
-          render release-notes-changelog.txt >release-notes.txt
-          echo "Release announcement: $(wc -m <release-announcement.txt) characters, release notes: $(wc -m <release-notes.txt)"
-
-      - name: Upload Release Announcement as Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-announcement.txt
-          path: release-announcement.txt
-          archive: false
+          cat release-notes.txt
 
       - name: Download the Installer
         uses: actions/download-artifact@v8
@@ -665,78 +556,10 @@ jobs:
           merge-multiple: true
           path: ${{ github.workspace }}/downloads
 
-      - name: Download the Developer SDK
-        uses: actions/download-artifact@v8
-        with:
-          pattern: sdk-*
-          merge-multiple: true
-          path: ${{ github.workspace }}/downloads
-
-      - name: Download Source Archive
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ needs.build-and-test.outputs.source_tarball }}
-          path: ${{ github.workspace }}/downloads
-
-      - name: Publish OpenMS Release
-        if: needs.build-and-test.outputs.has_version == 'true'
+      - name: Publish the Release
         uses: softprops/action-gh-release@v3
         with:
-          name: Release ${{ needs.build-and-test.outputs.version }}
+          name: Release ${{ needs.version.outputs.version }}
           body_path: release-notes.txt
           make_latest: true
           files: downloads/*
-
-  create-website-update:
-    name: Create Website Update
-    # without a status check, the implicit success() would also skip this job
-    # after a failed Debug SDK job, which is an ancestor through publish-release
-    if: ${{ !cancelled() && needs.publish-release.result == 'success' && github.repository == 'OpenMS/OpenMS' && needs.build-and-test.outputs.has_version == 'true' }}
-    runs-on: ubuntu-latest
-    permissions: write-all
-    needs:
-      - build-and-test
-      - publish-release
-    steps:
-      - name: get a token so that we can update the website
-        uses: actions/create-github-app-token@v1
-        id: app-token
-        with:
-          app-id: ${{ vars.OPENMS_GITHUB_APP_ID }}
-          private-key: ${{ secrets.OPENMS_GITHUB_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-
-      - name: checkout website
-        uses: actions/checkout@v6
-        with:
-          path: OpenMS-website
-          repository: OpenMS/OpenMS-website
-          token: ${{ steps.app-token.outputs.token }}
-
-      - name: Download the Release Announcement
-        uses: actions/download-artifact@v8
-        with:
-          name: release-announcement.txt
-          path: ${{ github.workspace }}/downloads
-
-      - name: create text for website and update it.
-        shell: bash
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          VERSION: ${{ needs.build-and-test.outputs.version }}
-        run:  |
-            cp \
-              "$GITHUB_WORKSPACE/downloads/release-announcement.txt" \
-              "OpenMS-website/content/en/news/release${VERSION}.md"
-
-            pushd OpenMS-website || exit 1
-            git config --local user.email "action@github.com"
-            git config --local user.name "GitHub Action"
-            git checkout -b "releaseannouncement${VERSION}"
-            git add "content/en/news/release${VERSION}.md"
-            git commit -am "Announce release ${VERSION}"
-            git push --set-upstream origin "releaseannouncement${VERSION}"
-            gh pr create \
-              --title "Release announcement for ${VERSION}" \
-              --body "announces ${VERSION}"
-            popd

@@ -1,0 +1,506 @@
+name: "Provide the OpenMS Core"
+description: >-
+  Makes an OpenMS core (libraries, CLI layer, headers, CMake package, shared data
+  and the TOPP tools) available to the job, built without the GUI, and tells where
+  it is. The GUI layer is then configured with
+  -DCMAKE_PREFIX_PATH="<prefix_path>;<Qt>" -DOPENMS_TOPP_BIN_DIR=<bin_dir>
+  -DOPENMS_EXAMPLES_DIR=<examples_dir> -DOPENMS_CORE_VERSION_FULLSTRING=<version_fullstring>.
+
+  Modes:
+    source  build OpenMS/OpenMS at the input 'ref' with its own presets and vcpkg
+            (WITH_GUI=OFF while that option exists, BUILD_TOPP_TOOLS=ON) and install
+            it into a fixed folder below RUNNER_TEMP. The installation is kept in the
+            Actions cache, keyed by the OpenMS commit, so a commit is built only once
+            per runner type.
+    sdk     download the OpenMS SDK of a nightly or release from archive.openms.de
+            and install the OpenMS installer of the same folder silently (the SDK has
+            no TOPP tools and no example data).
+
+  THE DEFAULT MODE (used when 'mode' is empty) is set in the first step below,
+  DEFAULT_MODE: 'source', because the nightlies and releases of OpenMS up to now are
+  built WITH_GUI=ON: their tool registry lists ExecutePipeline and ImageCreator,
+  which cmake/find_openms.cmake rejects (both registries in one installation make
+  every TOPP tool fail). Once OpenMS no longer has the WITH_GUI option and a nightly
+  without the GUI is published, change it to 'sdk'. That is the only place to
+  change: the workflows pass a mode only where they need a specific one.
+
+inputs:
+  mode:
+    description: "'source', 'sdk', or empty for the default (see the description of this action)"
+    required: false
+    default: ""
+  ref:
+    description: "source: branch, tag or commit of OpenMS/OpenMS to build"
+    required: false
+    default: "develop"
+  exact:
+    description: >-
+      source: 'true' builds the current commit of 'ref' unless it is cached already.
+      'false' takes the newest cached build of 'ref' if there is one, even if 'ref'
+      has moved on since (the nightly workflow refreshes it every day), so a pull
+      request does not wait for a build of the core.
+    required: false
+    default: "false"
+  channel:
+    description: "sdk: 'nightly', 'release' or a release candidate channel 'rc<N>'"
+    required: false
+    default: "nightly"
+  version:
+    description: >-
+      sdk: the folder on the archive server: 'latest', a nightly date YYYY.MM.DD or a
+      release X.Y.Z
+    required: false
+    default: "latest"
+  sdk:
+    description: >-
+      sdk: 'false' installs only the OpenMS installer (prefix_path is then empty), for
+      testing the installers of this repository on top of it
+    required: false
+    default: "true"
+  ssh_key:
+    description: "source: SSH private key for the vcpkg binary cache on the archive server"
+    required: false
+  ssh_host:
+    description: "source: SSH host for the vcpkg binary cache"
+    required: false
+  ssh_port:
+    description: "source: SSH port for the vcpkg binary cache"
+    required: false
+  ssh_user:
+    description: "source: SSH user for the vcpkg binary cache"
+    required: false
+
+outputs:
+  prefix_path:
+    description: "CMAKE_PREFIX_PATH entries (';'-separated) of the core and its build dependencies"
+    value: ${{ steps.source-result.outputs.prefix_path || steps.sdk-result.outputs.prefix_path }}
+  bin_dir:
+    description: "The directory with the TOPP tools of the core (OPENMS_TOPP_BIN_DIR)"
+    value: ${{ steps.source-result.outputs.bin_dir || steps.sdk-result.outputs.bin_dir }}
+  examples_dir:
+    description: "The example data of the core, share/OpenMS/examples (OPENMS_EXAMPLES_DIR)"
+    value: ${{ steps.source-result.outputs.examples_dir || steps.sdk-result.outputs.examples_dir }}
+  version_fullstring:
+    description: "The full version string of the core, e.g. 3.7.0-pre-nightly-2026-11-06 (OPENMS_CORE_VERSION_FULLSTRING)"
+    value: ${{ steps.source-result.outputs.version_fullstring || steps.sdk-result.outputs.version_fullstring }}
+  install_dir:
+    description: "sdk: where the OpenMS installer installed the core"
+    value: ${{ steps.source-result.outputs.install_dir || steps.sdk-result.outputs.install_dir }}
+  commit:
+    description: "source: the OpenMS commit the core was built from"
+    value: ${{ steps.source-result.outputs.commit || steps.sdk-result.outputs.commit }}
+
+runs:
+  using: "composite"
+  steps:
+
+    ############################################################################
+    # Common
+    - name: Check the Inputs and Choose the Folders
+      id: setup
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        # The default mode: 'source' while the OpenMS nightlies still contain the GUI,
+        # then 'sdk' (see the description of this action).
+        DEFAULT_MODE: source
+      run: |
+        mode=${MODE:-$DEFAULT_MODE}
+        case "$mode" in
+          source|sdk) ;;
+          *) echo >&2 "ERROR: unknown mode '$mode' (source or sdk)"; exit 1 ;;
+        esac
+        echo "OpenMS core mode: $mode"
+        echo "mode=$mode" >>"$GITHUB_OUTPUT"
+        # forward slashes on Windows: these paths go into CMake and into the cache action
+        tmp=$RUNNER_TEMP
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          tmp=$(cygpath -m "$RUNNER_TEMP")
+        fi
+        {
+          # the installation of a source build and its vcpkg dependencies; the
+          # libraries are linked with absolute RPATHs into it, so a cached build is
+          # restored to exactly this place
+          echo "core_dir=$tmp/openms-core"
+          echo "build_dir=$tmp/openms-core-build"
+          echo "download_dir=$tmp/openms-core-download"
+        } >>"$GITHUB_OUTPUT"
+
+    ############################################################################
+    # Mode 'source'
+    - name: Resolve the OpenMS Commit
+      id: commit
+      if: steps.setup.outputs.mode == 'source'
+      shell: bash
+      env:
+        REF: ${{ inputs.ref }}
+      run: |
+        if [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+          sha=$REF
+        else
+          refs=$(git ls-remote https://github.com/OpenMS/OpenMS.git \
+                   "refs/heads/$REF" "refs/tags/$REF" "refs/tags/$REF^{}")
+          # an annotated tag is listed twice; its commit is the peeled entry
+          sha=$(awk -v r="refs/tags/$REF^{}" '$2 == r { print $1 }' <<<"$refs")
+          if [[ -z "$sha" ]]; then
+            sha=$(awk 'NR == 1 { print $1 }' <<<"$refs")
+          fi
+          if [[ -z "$sha" ]]; then
+            echo >&2 "ERROR: OpenMS/OpenMS has no branch or tag '$REF'"
+            exit 1
+          fi
+        fi
+        echo "OpenMS $REF is at $sha"
+        {
+          echo "sha=$sha"
+          # bump the version (v1) to drop all cached cores, e.g. after a change of
+          # the configuration below. The ref ends with ':', which no git ref name
+          # contains, so the prefix of 'develop' does not match 'develop-foo'.
+          echo "key_prefix=openms-core-v1-$RUNNER_OS-$RUNNER_ARCH-$REF:"
+        } >>"$GITHUB_OUTPUT"
+
+    - name: Restore a Cached Build of the Core
+      id: core-cache
+      if: steps.setup.outputs.mode == 'source'
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          ${{ steps.setup.outputs.core_dir }}
+          !${{ steps.setup.outputs.core_dir }}/vcpkg_installed/*/debug
+          !${{ steps.setup.outputs.core_dir }}/vcpkg_installed/*/tools
+        key: ${{ steps.commit.outputs.key_prefix }}${{ steps.commit.outputs.sha }}
+        restore-keys: ${{ inputs.exact != 'true' && steps.commit.outputs.key_prefix || '' }}
+
+    - name: Check out OpenMS
+      if: steps.setup.outputs.mode == 'source' && steps.core-cache.outputs.cache-matched-key == ''
+      uses: actions/checkout@v6
+      with:
+        repository: OpenMS/OpenMS
+        # the branch or tag rather than the commit: the full version string of the
+        # build is made from the name of the branch (e.g. 3.7.0-pre-nightly-<date>)
+        ref: ${{ inputs.ref }}
+        path: _openms_core
+        persist-credentials: false
+
+    - name: Install the Build Dependencies of the Core
+      if: steps.setup.outputs.mode == 'source' && steps.core-cache.outputs.cache-matched-key == ''
+      shell: bash
+      env:
+        # otherwise brew updates the preinstalled packages that depend on what it installs
+        HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+      run: |
+        cd _openms_core || exit 1
+        # the vcpkg registry; its history is needed for the version overrides
+        git submodule update --init vcpkg
+        case "$RUNNER_OS" in
+          Linux)
+            bash tools/ci/deps-ubuntu.sh --skip-gui-deps
+            ;;
+          macOS)
+            bash tools/ci/deps-macos.sh --skip-doc-deps --skip-gui-deps
+            {
+              echo "$(brew --prefix)/bin"
+              echo "$(brew --prefix flex)/bin"
+              echo "$(brew --prefix bison)/bin"
+            } >>"$GITHUB_PATH"
+            ;;
+          Windows)
+            # cmake and ninja come with the dependencies of this repository. The
+            # vcpkg cache action needs rsync (in the version the server expects; its
+            # package also provides the ssh.exe the action uses) and rclone (its
+            # read-only fallback without the secrets), as in tools/ci/deps-windows.sh
+            # of OpenMS.
+            work_dir=$(mktemp -d)
+            git clone https://github.com/OpenMS/chocolatey-packages.git "$work_dir/chocolatey-packages"
+            (cd "$work_dir/chocolatey-packages" && make &&
+              cd build && choco install -y --no-progress -s . rclone rsync)
+            rm -rf "$work_dir"
+            ;;
+        esac
+
+    # skipped when the job has a Visual Studio environment already (VCINSTALLDIR):
+    # vcvars run twice can make PATH too long for cmd
+    - name: Emulate a Visual Studio Shell (Windows)
+      if: steps.setup.outputs.mode == 'source' && steps.core-cache.outputs.cache-matched-key == '' && runner.os == 'Windows' && env.VCINSTALLDIR == ''
+      uses: egor-tensin/vs-shell@v2
+      with: { arch: x64 }
+
+    # The vcpkg binary cache of the core build on the archive server. Its name
+    # differs from the one of the OpenMS repository (vcpkg-cache), so the two never
+    # overwrite each other's archives.
+    - name: Restore the vcpkg Binary Cache
+      if: steps.setup.outputs.mode == 'source' && steps.core-cache.outputs.cache-matched-key == ''
+      uses: OpenMS/ci-tools/actions/rsync-cache@b0622a9a8ecfe12fa6e896795f45fddad12faa6c
+      with:
+        name: vcpkg-cache-openms-topp-gui
+        path: ${{ github.workspace }}/.vcpkg-cache
+        key: ${{ runner.os }}-${{ runner.arch }}-core-vcpkg-${{ hashFiles('_openms_core/vcpkg.json', '_openms_core/vcpkg-configuration.json') }}
+        ssh_key: ${{ inputs.ssh_key }}
+        ssh_host: ${{ inputs.ssh_host }}
+        ssh_port: ${{ inputs.ssh_port }}
+        ssh_user: ${{ inputs.ssh_user }}
+
+    - name: Point vcpkg at the Local Binary Cache
+      if: steps.setup.outputs.mode == 'source' && steps.core-cache.outputs.cache-matched-key == ''
+      shell: bash
+      run: |
+        mkdir -p "$GITHUB_WORKSPACE/.vcpkg-cache"
+        echo "VCPKG_BINARY_SOURCES=clear;files,$GITHUB_WORKSPACE/.vcpkg-cache,readwrite" >>"$GITHUB_ENV"
+
+    - name: Set up vcpkg
+      if: steps.setup.outputs.mode == 'source' && steps.core-cache.outputs.cache-matched-key == ''
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgDirectory: ${{ github.workspace }}/_openms_core/vcpkg
+        vcpkgJsonGlob: _openms_core/vcpkg.json
+        doNotCache: true
+
+    - name: Build and Install the Core
+      id: core-build
+      if: steps.setup.outputs.mode == 'source' && steps.core-cache.outputs.cache-matched-key == ''
+      shell: bash
+      env:
+        CORE_DIR: ${{ steps.setup.outputs.core_dir }}
+        BUILD_DIR: ${{ steps.setup.outputs.build_dir }}
+        # the same minimum macOS as the GUI layer (see the build action)
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+        # the compiler cache of this repository's build is not used for the core
+        CMAKE_C_COMPILER_LAUNCHER: ""
+        CMAKE_CXX_COMPILER_LAUNCHER: ""
+      run: |
+        set -euxo pipefail
+        cd _openms_core || exit 1
+
+        case "$RUNNER_OS-$RUNNER_ARCH" in
+          Linux-X64) preset=linux-x64-ci ;;
+          Linux-ARM64) preset=linux-arm64-ci ;;
+          macOS-ARM64) preset=macos-arm64-ci ;;
+          Windows-X64) preset=windows-x64-ci ;;
+          *) echo >&2 "ERROR: no OpenMS preset for $RUNNER_OS-$RUNNER_ARCH"; exit 1 ;;
+        esac
+
+        # The CI preset of OpenMS, reduced to what the GUI layer needs: the libraries
+        # and the TOPP tools, no tests, no documentation, and none of the optional
+        # dependencies that take long to build (ONNX Runtime, the Thermo bridge).
+        options=(
+          "-DCMAKE_INSTALL_PREFIX=$CORE_DIR/install"
+          "-DVCPKG_INSTALLED_DIR=$CORE_DIR/vcpkg_installed"
+          "-DVCPKG_MANIFEST_FEATURES=isospec;eol-bspline;simde;nlohmann-json;sqlitecpp;opentims"
+          -DBUILD_TOPP_TOOLS=ON
+          -DINSTALL_OPENMS_EXAMPLES=ON
+          -DENABLE_CLASS_TESTING=OFF
+          -DENABLE_TOPP_TESTING=OFF
+          -DENABLE_DOCS=OFF
+          -DENABLE_TUTORIALS=OFF
+          -DOPENMS_TEST_INSTALLED_CONSUMER=OFF
+          -DOPENMS_VERIFY_INTERFACE_HEADER_SETS=OFF
+          -DWITH_ONNX=OFF
+          -DWITH_THERMO_RAW=OFF
+          -DPACKAGE_TYPE=none
+        )
+        # an OpenMS that still has its own GUI is built without it
+        if grep -q 'option(WITH_GUI' CMakeLists.txt; then
+          options+=(-DWITH_GUI=OFF)
+        fi
+        if [[ "$RUNNER_OS" == "macOS" ]]; then
+          options+=("-DCMAKE_PREFIX_PATH=$(brew --prefix)")
+        fi
+        # CMake with Ninja prefers c++/g++ over cl.exe, and the Windows runners have
+        # MinGW compilers on PATH (the build action of OpenMS sets CC/CXX as well)
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          export CC=cl.exe CXX=cl.exe
+        fi
+
+        cmake --preset "$preset" -B "$BUILD_DIR" "${options[@]}"
+        cmake --build "$BUILD_DIR"
+
+        rm -rf "$CORE_DIR/install"
+        for component in library library_cli \
+                         headers OpenMS_headers OpenMS_CLI_headers OpenSwathAlgo_headers thirdparty_headers \
+                         cmake cmake_cli share examples Applications; do
+          cmake --install "$BUILD_DIR" --component "$component"
+        done
+
+        # what later runs that restore this build need to know
+        cache_var() { sed -n "s/^$1:[A-Z]*=//p" "$BUILD_DIR/CMakeCache.txt" | head -n 1; }
+        fullstring=$(cache_var CF_OPENMS_PACKAGE_VERSION_FULLSTRING)
+        {
+          echo "commit=$(git rev-parse HEAD)"
+          echo "triplet=$(cache_var VCPKG_TARGET_TRIPLET)"
+          echo "version_fullstring=$fullstring"
+        } | tee "$CORE_DIR/openms-core.txt"
+        echo "commit=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+
+    # Saved right away, so the build is kept even when the tests of the GUI fail.
+    # The key names the commit that was built (the branch may have moved since the
+    # lookup above).
+    - name: Save the Build of the Core
+      if: steps.setup.outputs.mode == 'source' && steps.core-build.outcome == 'success'
+      uses: actions/cache/save@v5
+      with:
+        path: |
+          ${{ steps.setup.outputs.core_dir }}
+          !${{ steps.setup.outputs.core_dir }}/vcpkg_installed/*/debug
+          !${{ steps.setup.outputs.core_dir }}/vcpkg_installed/*/tools
+        key: ${{ steps.commit.outputs.key_prefix }}${{ steps.core-build.outputs.commit }}
+
+    - name: Describe the Core (source)
+      id: source-result
+      if: steps.setup.outputs.mode == 'source'
+      shell: bash
+      env:
+        CORE_DIR: ${{ steps.setup.outputs.core_dir }}
+      run: |
+        info="$CORE_DIR/openms-core.txt"
+        if [[ ! -f "$info" ]]; then
+          echo >&2 "ERROR: no OpenMS core in $CORE_DIR"
+          exit 1
+        fi
+        get() { sed -n "s/^$1=//p" "$info"; }
+        triplet=$(get triplet)
+        deps="$CORE_DIR/vcpkg_installed/$triplet"
+        echo "Using OpenMS $(get version_fullstring) (commit $(get commit))"
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          # the DLLs of the vcpkg dependencies, for the TOPP tools and the tests
+          cygpath -w "$deps/bin" >>"$GITHUB_PATH"
+        fi
+        {
+          # the vcpkg tree: the shared libraries the core links (found through its package)
+          echo "prefix_path=$CORE_DIR/install;$deps"
+          echo "bin_dir=$CORE_DIR/install/bin"
+          echo "examples_dir=$CORE_DIR/install/share/OpenMS/examples"
+          echo "version_fullstring=$(get version_fullstring)"
+          echo "commit=$(get commit)"
+          echo "install_dir=$CORE_DIR/install"
+        } >>"$GITHUB_OUTPUT"
+
+    ############################################################################
+    # Mode 'sdk'
+    - name: Find the SDK and the Installer
+      id: sdk-resolve
+      if: steps.setup.outputs.mode == 'sdk'
+      shell: bash
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        VERSION: ${{ inputs.version }}
+        NEED_SDK: ${{ inputs.sdk }}
+      run: |
+        bash "$GITHUB_ACTION_PATH/resolve-sdk.sh" "$CHANNEL" "$VERSION" "$RUNNER_OS" "$RUNNER_ARCH" "$NEED_SDK" |
+          tee -a "$GITHUB_OUTPUT"
+
+    - name: Download the SDK and the Installer
+      if: steps.setup.outputs.mode == 'sdk'
+      shell: bash
+      env:
+        DOWNLOAD_DIR: ${{ steps.setup.outputs.download_dir }}
+        SDK_URL: ${{ steps.sdk-resolve.outputs.sdk_url }}
+        SDK_NAME: ${{ steps.sdk-resolve.outputs.sdk_name }}
+        INSTALLER_URL: ${{ steps.sdk-resolve.outputs.installer_url }}
+        INSTALLER_NAME: ${{ steps.sdk-resolve.outputs.installer_name }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$DOWNLOAD_DIR"
+        fetch() {
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors -o "$DOWNLOAD_DIR/$2" "$1"
+        }
+        fetch "$INSTALLER_URL" "$INSTALLER_NAME"
+        if [[ -n "$SDK_URL" ]]; then
+          fetch "$SDK_URL" "$SDK_NAME"
+        fi
+        ls -l "$DOWNLOAD_DIR"
+
+    - name: Extract the SDK
+      id: sdk-extract
+      if: steps.setup.outputs.mode == 'sdk' && inputs.sdk == 'true'
+      shell: bash
+      env:
+        CORE_DIR: ${{ steps.setup.outputs.core_dir }}
+        DOWNLOAD_DIR: ${{ steps.setup.outputs.download_dir }}
+        SDK_NAME: ${{ steps.sdk-resolve.outputs.sdk_name }}
+      run: |
+        set -euo pipefail
+        rm -rf "$CORE_DIR"
+        mkdir -p "$CORE_DIR"
+        case "$SDK_NAME" in
+          *.zip) 7z x -y -bd "-o$CORE_DIR" "$DOWNLOAD_DIR/$SDK_NAME" >/dev/null ;;
+          *.tar.gz) tar -xzf "$DOWNLOAD_DIR/$SDK_NAME" -C "$CORE_DIR" ;;
+        esac
+        # the archive has a single top-level folder named like the archive
+        sdk_dir="$CORE_DIR/${SDK_NAME%.zip}"
+        sdk_dir="${sdk_dir%.tar.gz}"
+        if [[ ! -d "$sdk_dir" ]]; then
+          echo >&2 "ERROR: the SDK archive has no folder ${sdk_dir##*/}"
+          ls "$CORE_DIR"
+          exit 1
+        fi
+        echo "sdk_dir=$sdk_dir" >>"$GITHUB_OUTPUT"
+
+    - name: Install the OpenMS Installer (Linux)
+      id: install-linux
+      if: steps.setup.outputs.mode == 'sdk' && runner.os == 'Linux'
+      shell: bash
+      env:
+        DOWNLOAD_DIR: ${{ steps.setup.outputs.download_dir }}
+        INSTALLER_NAME: ${{ steps.sdk-resolve.outputs.installer_name }}
+      run: |
+        sudo apt-get -qq update
+        sudo apt-get -qq install -y --no-install-recommends "$DOWNLOAD_DIR/$INSTALLER_NAME"
+        echo "install_dir=/usr" >>"$GITHUB_OUTPUT"
+
+    - name: Install the OpenMS Installer (macOS)
+      id: install-macos
+      if: steps.setup.outputs.mode == 'sdk' && runner.os == 'macOS'
+      shell: bash
+      env:
+        DOWNLOAD_DIR: ${{ steps.setup.outputs.download_dir }}
+        INSTALLER_NAME: ${{ steps.sdk-resolve.outputs.installer_name }}
+        FULLSTRING: ${{ steps.sdk-resolve.outputs.version_fullstring }}
+      run: |
+        sudo installer -pkg "$DOWNLOAD_DIR/$INSTALLER_NAME" -target /
+        # the prefix of the OpenMS package (cmake/package_mac_productbuild.cmake of OpenMS)
+        echo "install_dir=/Applications/OpenMS-$FULLSTRING" >>"$GITHUB_OUTPUT"
+
+    - name: Install the OpenMS Installer (Windows)
+      id: install-windows
+      if: steps.setup.outputs.mode == 'sdk' && runner.os == 'Windows'
+      shell: pwsh
+      env:
+        DOWNLOAD_DIR: ${{ steps.setup.outputs.download_dir }}
+        INSTALLER_NAME: ${{ steps.sdk-resolve.outputs.installer_name }}
+      run: |
+        $target = 'C:\OpenMS-core'
+        # NSIS: /S silent, /D the folder (last, unquoted)
+        $p = Start-Process -FilePath (Join-Path $env:DOWNLOAD_DIR $env:INSTALLER_NAME) `
+               -ArgumentList '/S', "/D=$target" -Wait -PassThru
+        if ($p.ExitCode -ne 0) { throw "The OpenMS installer failed with exit code $($p.ExitCode)" }
+        if (-not (Test-Path (Join-Path $target 'bin'))) { throw "The OpenMS installer left no $target\bin" }
+        "install_dir=C:/OpenMS-core" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+    - name: Describe the Core (sdk)
+      id: sdk-result
+      if: steps.setup.outputs.mode == 'sdk'
+      shell: bash
+      env:
+        SDK_DIR: ${{ steps.sdk-extract.outputs.sdk_dir }}
+        INSTALL_DIR: ${{ steps.install-linux.outputs.install_dir }}${{ steps.install-macos.outputs.install_dir }}${{ steps.install-windows.outputs.install_dir }}
+        FULLSTRING: ${{ steps.sdk-resolve.outputs.version_fullstring }}
+      run: |
+        set -euo pipefail
+        bin_dir="$INSTALL_DIR/bin"
+        if [[ ! -e "$bin_dir/FileInfo" && ! -e "$bin_dir/FileInfo.exe" ]]; then
+          echo >&2 "ERROR: the OpenMS installer installed no TOPP tools into $bin_dir"
+          exit 1
+        fi
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          # the core's DLLs for the TOPP tools and the tests
+          cygpath -w "$bin_dir" >>"$GITHUB_PATH"
+        fi
+        echo "Using OpenMS $FULLSTRING: SDK ${SDK_DIR:-(none)}, installation $INSTALL_DIR"
+        {
+          echo "prefix_path=$SDK_DIR"
+          echo "bin_dir=$bin_dir"
+          echo "examples_dir=$INSTALL_DIR/share/OpenMS/examples"
+          echo "version_fullstring=$FULLSTRING"
+          echo "install_dir=$INSTALL_DIR"
+          echo "commit="
+        } >>"$GITHUB_OUTPUT"

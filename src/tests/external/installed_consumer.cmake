@@ -44,13 +44,19 @@ if(CMAKE_GENERATOR_TOOLSET)
 endif()
 
 ## the prefixes of the core (OpenMS_DIR is <prefix>/lib/cmake/OpenMS, <prefix>/CMake on
-## Windows) and of Qt (Qt6_DIR is <prefix>/lib/cmake/Qt6)
+## Windows) and of Qt (Qt6_DIR is <prefix>/lib/cmake/Qt6, <prefix>/lib/<arch>/cmake/Qt6
+## on Debian, <prefix>/share/Qt6 with vcpkg)
 if(WIN32)
   get_filename_component(_core_prefix "${OpenMS_DIR}/.." ABSOLUTE)
 else()
   get_filename_component(_core_prefix "${OpenMS_DIR}/../../.." ABSOLUTE)
 endif()
-get_filename_component(_qt_prefix "${Qt6_DIR}/../../.." ABSOLUTE)
+get_filename_component(_qt_prefix "${Qt6_DIR}" ABSOLUTE)
+if(_qt_prefix MATCHES "^(.+)/(lib(64)?(/[^/]+)?/cmake|share)/Qt6$")
+  set(_qt_prefix "${CMAKE_MATCH_1}")
+else()
+  get_filename_component(_qt_prefix "${Qt6_DIR}/../../.." ABSOLUTE)
+endif()
 
 set(_consumer_root "${CMAKE_BINARY_DIR}/installed-consumer")
 set(_gui_prefix "${_consumer_root}/prefix")

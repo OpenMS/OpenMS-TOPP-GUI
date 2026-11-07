@@ -35,12 +35,12 @@ install(FILES "${OPENMS_TOOL_REGISTRY_BUILD_FILE}"
 # the style sheet of the GUI applications (read through File::find("GUISTYLE/...")).
 #------------------------------------------------------------------------------
 install_directory(${OPENMS_HOST_DIRECTORY}/share/OpenMS/GUISTYLE ${INSTALL_SHARE_DIR} ${OPENMS_GUI_APPLICATIONS_COMPONENT})
+include(${OPENMS_HOST_DIRECTORY}/cmake/install_desktop.cmake)
 
 #------------------------------------------------------------------------------
 # Tests (class tests of the GUI library, tests of the GUI TOPP tools, TOPPAS
 # pipeline tests, installed-consumer test)
 #------------------------------------------------------------------------------
-enable_testing()
 if(ENABLE_CLASS_TESTING OR ENABLE_TOPP_TESTING OR ENABLE_PIPELINE_TESTING OR OPENMS_TEST_INSTALLED_CONSUMER)
   add_subdirectory(tests)
 endif()

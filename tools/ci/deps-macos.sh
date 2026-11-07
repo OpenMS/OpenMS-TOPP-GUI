@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
+# Copyright (c) 2002-present, OpenMS Inc. -- EKU Tuebingen, ETH Zurich, and FU Berlin
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# The dependencies of OpenMS-TOPP-GUI on macOS (Homebrew). The OpenMS core is
+# not installed here: build it from source or use the OpenMS SDK (see README.md).
 
 set -eu
 set -o pipefail
 
-# Parse command line arguments
 SKIP_DOC_DEPS=false
-SKIP_GUI_DEPS=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -13,29 +16,22 @@ while [[ $# -gt 0 ]]; do
     SKIP_DOC_DEPS=true
     shift
     ;;
-  --skip-gui-deps)
-    SKIP_GUI_DEPS=true
-    shift
-    ;;
   *)
     echo "Unknown option: $1"
-    echo "Usage: $0 [--skip-doc-deps] [--skip-gui-deps]"
+    echo "Usage: $0 [--skip-doc-deps]"
     exit 1
     ;;
   esac
 done
 
-# Unfortunately GitHub's macOS runner already has Python installed so
-# we need to tell brew to overwrite the existing links.  The following
-# function will be called when the brew commands below are executed.
-# It then calls the real brew command.
+# GitHub's macOS runners come with packages (e.g. Python) whose links brew would
+# refuse to overwrite. This wrapper adds --overwrite to every brew install below.
 function brew() {
   local action=$1
   shift
 
-  # Bash on macOS doesn't allow using empty arrays.  Therefore we put
-  # the action name in the flags array so it always has at least one
-  # element.  This is also why we install bash below.
+  # macOS' bash 3.2 rejects empty arrays under 'set -u', so the action is the
+  # first element of the flags
   local -a flags=("$action")
 
   if [ "$action" = "install" ]; then
@@ -46,45 +42,30 @@ function brew() {
 }
 
 # Code between the following doxygen markers are included in the
-# public-facing OpenMS installation instructions.
+# public-facing installation instructions.
 
 # [installation_documentation]
 # Update the package index:
 brew update
 
-# Required dependencies:
+# Build tools and Qt:
 brew install \
-  bash \
-  bison \
-  dotnet \
-  flex \
-  icu4c \
-  libomp \
-  pkg-config \
-  ninja
+  ninja \
+  qtbase \
+  qtsvg
 
-# libomp is the OpenMP runtime, which Apple's Clang does not ship. The formula is
-# keg-only: the macOS presets find it in /opt/homebrew/opt/libomp, other builds need
-# -DOpenMP_ROOT=$(brew --prefix libomp). Without it OpenMS runs single-threaded.
-
-# GUI dependencies (can be skipped for non-GUI builds):
-if [ "$SKIP_GUI_DEPS" = false ]; then
-  brew install qtbase qtsvg
-fi
+# libomp: the OpenMP runtime of an OpenMS built from source with Homebrew's libomp
+# (the macOS presets point OpenMP_ROOT at /opt/homebrew/opt/libomp). The OpenMS SDK
+# bundles its own and does not need it.
+brew install libomp
 
 # Optional documentation dependencies:
 if [ "$SKIP_DOC_DEPS" = false ]; then
   brew install \
     doxygen
 fi
-
-# Graphviz is only needed for the optional 'doc_dot' target (documentation
-# with all dot graphs), so it is not installed here:
-#   brew install graphviz
 # [installation_documentation]
 
 # These are only needed in CI:
 brew install \
-  ccache \
-  rclone \
-  rsync
+  ccache

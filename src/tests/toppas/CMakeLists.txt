@@ -32,13 +32,13 @@ set(OPENMS_EXAMPLES_DIR "${OPENMS_DATA_DIR}/examples" CACHE PATH
     "The examples directory of the OpenMS core (share/OpenMS/examples), whose TOPPAS workflows the pipeline tests run.")
 
 # _openms_gui_missing_tools(<out_var> <workflow.toppas>)
-# The TOPP tools of the workflow that are not in OPENMS_TOPP_BIN_DIR.
+# The TOPP tools of the workflow that are neither in OPENMS_TOPP_BIN_DIR nor built here.
 function(_openms_gui_missing_tools out_var workflow)
   file(STRINGS "${workflow}" _tool_lines REGEX "<ITEM name=\"tool_name\" value=\"[^\"]+\"")
   set(_missing)
   foreach(_line IN LISTS _tool_lines)
     string(REGEX REPLACE ".*<ITEM name=\"tool_name\" value=\"([^\"]+)\".*" "\\1" _tool "${_line}")
-    if(NOT EXISTS "${OPENMS_TOPP_BIN_DIR}/${_tool}${CMAKE_EXECUTABLE_SUFFIX}")
+    if(NOT TARGET ${_tool} AND NOT EXISTS "${OPENMS_TOPP_BIN_DIR}/${_tool}${CMAKE_EXECUTABLE_SUFFIX}")
       list(APPEND _missing ${_tool})
     endif()
   endforeach()
@@ -84,7 +84,12 @@ foreach(I_PIPELINE_PATH ${TOPPAS_EXAMPLE_PIPELINES})
     message(STATUS "TOPP_ExecutePipeline_${I_FILE} is left out: ${_missing} not found in OPENMS_TOPP_BIN_DIR='${OPENMS_TOPP_BIN_DIR}'.")
     continue()
   endif()
-  add_test(NAME "TOPP_ExecutePipeline_${I_FILE}" COMMAND ExecutePipeline -test -in "${I_PIPELINE_PATH}" -out_dir . -num_jobs 4)
+  ## each workflow writes its results (TOPPAS_out/<node>-<tool>-...) into a directory
+  ## of its own, so workflows run in parallel cannot overwrite each other's files
+  set(_workflow_dir "${DATA_DIR_TOPPAS_BIN}/${I_FILE}.out")
+  file(MAKE_DIRECTORY "${_workflow_dir}")
+  add_test(NAME "TOPP_ExecutePipeline_${I_FILE}" COMMAND ExecutePipeline -test -in "${I_PIPELINE_PATH}" -out_dir . -num_jobs 4
+           WORKING_DIRECTORY "${_workflow_dir}")
   ## allow failure if search engines (comet.exe etc) are not found
   set_tests_properties("TOPP_ExecutePipeline_${I_FILE}" PROPERTIES SKIP_RETURN_CODE 14) ## EXTERNAL_PROGRAM_NOTFOUND
   list(APPEND _pipeline_tests "TOPP_ExecutePipeline_${I_FILE}")

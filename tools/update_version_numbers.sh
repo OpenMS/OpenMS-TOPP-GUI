@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# Copyright (c) 2002-present, OpenMS Inc. -- EKU Tuebingen, ETH Zurich, and FU Berlin
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Set the version of OpenMS-TOPP-GUI. It is always the version of the OpenMS core
+# the GUI layer is built against (find_package(OpenMS <version> EXACT)), so it is
+# changed together with the version of OpenMS.
 
 ################################################################################
 set -eu
@@ -11,7 +17,10 @@ Usage: $(basename "$0") [options] major minor patch
 
   -h      This message
 
-Update the OpenMS version number.
+Update the version number of OpenMS-TOPP-GUI (run from the top-level directory):
+  - OPENMS_GUI_VERSION in CMakeLists.txt
+  - the version item of the INI files of the tests (src/tests/topp/*.ini)
+  - a new section in CHANGELOG
 
 EOF
 }
@@ -33,69 +42,73 @@ done
 shift $((OPTIND - 1))
 
 if [ $# -ne 3 ]; then
-  echo >&2 "ERROR: please provide three numbers (use --help for more info)"
+  echo >&2 "ERROR: please provide three numbers (use -h for more info)"
+  exit 1
+fi
+
+for number in "$@"; do
+  if ! [[ "$number" =~ ^[0-9]+$ ]]; then
+    echo >&2 "ERROR: '$number' is not a number"
+    exit 1
+  fi
+done
+
+if [ ! -f CMakeLists.txt ] || ! grep -q '^set(OPENMS_GUI_VERSION ' CMakeLists.txt; then
+  echo >&2 "ERROR: run this script from the top-level directory of OpenMS-TOPP-GUI"
   exit 1
 fi
 
 ################################################################################
-package_version_major=$1
-package_version_minor=$2
-package_version_patch=$3
 package_version="$1.$2.$3"
 
 echo "Setting version $package_version"
 
 ################################################################################
-# update main cmakelist
-sed -i -e "s#.*set(OPENMS_PACKAGE_VERSION_MAJOR.*#set(OPENMS_PACKAGE_VERSION_MAJOR \"$package_version_major\")#" CMakeLists.txt
-sed -i -e "s#.*set(OPENMS_PACKAGE_VERSION_MINOR.*#set(OPENMS_PACKAGE_VERSION_MINOR \"$package_version_minor\")#" CMakeLists.txt
-sed -i -e "s#.*set(OPENMS_PACKAGE_VERSION_PATCH.*#set(OPENMS_PACKAGE_VERSION_PATCH \"$package_version_patch\")#" CMakeLists.txt
+# the version of the project (and of the OpenMS core it requires)
+sed -i -e "s#^set(OPENMS_GUI_VERSION .*)#set(OPENMS_GUI_VERSION $package_version)#" CMakeLists.txt
 
-# update version info test
-sed -i -e "s#detail.version_major =.*#detail.version_major = $package_version_major;#" ./src/tests/class_tests/openms/source/VersionInfo_test.cpp
-sed -i -e "s#detail.version_minor =.*#detail.version_minor = $package_version_minor;#" ./src/tests/class_tests/openms/source/VersionInfo_test.cpp
-sed -i -e "s#detail.version_patch =.*#detail.version_patch = $package_version_patch;#" ./src/tests/class_tests/openms/source/VersionInfo_test.cpp
-
-# update vcpkg.json
-sed -i -e "s/\"version-string\": \".*\"/\"version-string\": \"$package_version\"/" vcpkg.json
-
-# update test write ini out:
-sed -i -e "s#<ITEM name=\"version\" value=\".*\" type=\"string\"#<ITEM name=\"version\" value=\"$package_version\" type=\"string\"#g" ./src/tests/topp/WRITE_INI_OUT.ini
-# update INIUpdater version
-sed -i -e "s#<ITEM name=\"version\" value=\".*\" type=\"string\"#<ITEM name=\"version\" value=\"$package_version\" type=\"string\"#g" ./src/tests/topp/INIUpdater_1_noupdate.toppas
-
-# update INIs in tests topp:
+# the INI files of the tests, which carry the version of the tool that wrote them
 find ./src/tests/topp/ \
   -type f \
   -name '*.ini' \
   -exec grep -q "<ITEM name=\"version\" value=\".*\" type=\"string\"" {} \; \
-  -exec sed -i -e "s#<ITEM name=\"version\" value=\".*\" type=\"string\"#<ITEM name=\"version\" value=\"$package_version\" type=\"string\"#g" {} \;
+  -exec sed -i -e "s#<ITEM name=\"version\" value=\"[^\"]*\" type=\"string\"#<ITEM name=\"version\" value=\"$package_version\" type=\"string\"#g" {} \;
 
-# Update Changelog
-#
-# Create a banner with line endings that sed wants (add a backslash
-# in front of each newline except the last.
-section_header=$(
-  sed -Ee '$!s/$/\\/' <<<"
+# CITATION.cff, if it carries a version
+if grep -q '^version:' CITATION.cff 2>/dev/null; then
+  sed -i -e "s#^version:.*#version: \"$package_version\"#" CITATION.cff
+fi
+
+################################################################################
+# A new section at the top of the CHANGELOG (above its first line of dashes),
+# unless it has one for this version already. sed wants a backslash at the end of
+# every line of the inserted text but the last.
+if grep -qE "^----[[:space:]]+OpenMS-TOPP-GUI ${package_version//./\\.}[[:space:]]" CHANGELOG; then
+  echo "CHANGELOG already has a section for $package_version"
+else
+  section_header=$(
+    sed -Ee '$!s/$/\\/' <<<"
 ------------------------------------------------------------------------------------------
-----                                OpenMS ${package_version}     (under development)              ----
+----                         OpenMS-TOPP-GUI ${package_version}     (under development)            ----
+----                         requires OpenMS ${package_version}                                    ----
 ------------------------------------------------------------------------------------------
 
  " # NOTE: this line should start with a single blank space!
-)
+  )
 
-# Get the line number of the first line starting with more than 10 "-"
-line_num=$(
-  grep \
-    --extended-regexp \
-    --line-number \
-    --max-count=1 "^-{10,}" CHANGELOG |
-    cut -d: -f1
-)
+  # the line number of the first line starting with more than 10 "-"
+  line_num=$(
+    grep \
+      --extended-regexp \
+      --line-number \
+      --max-count=1 "^-{10,}" CHANGELOG |
+      cut -d: -f1
+  )
 
-sed -i \
-  -e "${line_num}i $section_header" \
-  CHANGELOG
+  sed -i \
+    -e "${line_num}i $section_header" \
+    CHANGELOG
+fi
 
 ################################################################################
 echo "done."

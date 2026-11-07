@@ -96,6 +96,23 @@ if(NOT EXISTS "${OPENMS_FUZZYDIFF}")
                  "the tests that compare output files are left out.")
 endif()
 
+## The TOPP tools run by the tests (FuzzyDiff, the tools of the pipelines) read the tool
+## registry of their own installation plus OPENMS_TOOL_REGISTRY_PATH. If that installation
+## is not the core this build uses and was built with its own GUI, it registers the GUI
+## TOPP tools as well, and every tool started with the registry of this build fails on the
+## duplicate names (cmake/find_openms.cmake checks the same for the core itself).
+file(GLOB _topp_bin_registries "${OPENMS_TOPP_BIN_DIR}/../share/OpenMS/TOOLS/*.tsv")
+foreach(_registry IN LISTS _topp_bin_registries)
+  file(STRINGS "${_registry}" _gui_tools_in_registry REGEX "^(ExecutePipeline|ImageCreator)\t")
+  if(_gui_tools_in_registry AND OPENMS_GUI_TEST_REGISTRY_PATH)
+    message(WARNING "The tool registry of the TOPP tools in OPENMS_TOPP_BIN_DIR, ${_registry}, lists the GUI "
+            "TOPP tools (an OpenMS built with its own GUI): the pipeline tests will fail. Point "
+            "OPENMS_TOPP_BIN_DIR to the TOPP tools of an OpenMS built without the GUI.")
+  endif()
+endforeach()
+unset(_topp_bin_registries)
+unset(_gui_tools_in_registry)
+
 #------------------------------------------------------------------------------
 # Class tests
 if(ENABLE_CLASS_TESTING)

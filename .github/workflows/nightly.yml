@@ -1,0 +1,69 @@
+name: "Nightly"
+
+# Every night the GUI layer is built and tested against the current OpenMS
+# develop branch, built from source. The CI of OpenMS no longer compiles any GUI
+# code, so this is where a change of the OpenMS API that breaks the GUI shows up.
+# Each run also refreshes the cached build of OpenMS develop that the pull
+# requests of this repository use.
+#
+# Triggers:
+#  - schedule: after the nightly of OpenMS (its update_nightly workflow starts at
+#    01:07 UTC and its release workflow publishes the installers about an hour
+#    later).
+#  - repository_dispatch, event type 'openms-core-nightly': OpenMS can start this
+#    workflow at the end of its nightly release workflow, e.g.
+#      gh api repos/OpenMS/OpenMS-TOPP-GUI/dispatches \
+#        -f event_type=openms-core-nightly
+#    with a token that may dispatch workflows in this repository. client_payload.ref
+#    (optional, e.g. -f 'client_payload[ref]=develop') is the OpenMS branch, tag or
+#    commit to build (default: develop). Only a build of develop is the cached core
+#    of the pull requests; a commit gets a cache entry of its own and a full version
+#    string without a branch name.
+#  - workflow_dispatch.
+#
+# The nightly installers (release.yml) are only built when the repository variable
+# GUI_NIGHTLY_INSTALLERS is 'true': they are installed on top of the OpenMS nightly
+# installers of the same day, which must not contain the GUI themselves (until
+# OpenMS has dropped it, an installation would have two copies of every GUI tool).
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  repository_dispatch:
+    types: [openms-core-nightly]
+  workflow_dispatch:
+    inputs:
+      core_ref:
+        description: "Branch, tag or commit of OpenMS/OpenMS to build and test against"
+        type: string
+        default: "develop"
+      installers:
+        description: "Also build (and deploy) the nightly installers"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-openms-core
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: "Test against OpenMS ${{ inputs.core_ref || github.event.client_payload.ref || 'develop' }}"
+    uses: ./.github/workflows/test.yml
+    with:
+      core_mode: source
+      core_ref: ${{ inputs.core_ref || github.event.client_payload.ref || 'develop' }}
+      core_exact: true
+    secrets: inherit
+
+  installers:
+    name: "Nightly Installers"
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.installers) || (github.event_name != 'workflow_dispatch' && vars.GUI_NIGHTLY_INSTALLERS == 'true') }}
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      deploy: true
+    secrets: inherit

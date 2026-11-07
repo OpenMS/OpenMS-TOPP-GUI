@@ -1,9 +1,52 @@
 name: "Build and Test"
 
+# Builds and tests the GUI layer against an OpenMS core without GUI; where the
+# core comes from is decided by .github/actions/openms-core (default: built from
+# OpenMS develop, the newest cached build of it for pushes and pull requests).
 on:
   workflow_dispatch:
+    inputs:
+      core_mode:
+        description: "Where the OpenMS core comes from: source, sdk, or empty for the default of the openms-core action"
+        type: string
+        default: ""
+      core_ref:
+        description: "source: branch, tag or commit of OpenMS/OpenMS"
+        type: string
+        default: "develop"
+      core_exact:
+        description: "source: build the current commit of core_ref instead of taking the newest cached build of it"
+        type: boolean
+        default: false
+      core_channel:
+        description: "sdk: nightly or release"
+        type: string
+        default: "nightly"
+      core_version:
+        description: "sdk: latest, a nightly date YYYY.MM.DD or a release X.Y.Z"
+        type: string
+        default: "latest"
+  # used by nightly.yml
+  workflow_call:
+    inputs:
+      core_mode:
+        type: string
+        default: ""
+      core_ref:
+        type: string
+        default: "develop"
+      core_exact:
+        type: boolean
+        default: false
+      core_channel:
+        type: string
+        default: "nightly"
+      core_version:
+        type: string
+        default: "latest"
   push:
     branches:
+      - develop
       - nightly
       - release/*
   pull_request:
@@ -19,25 +62,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  header-set-compatibility:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - name: Install the minimum supported CMake version
-        shell: bash
-        run: |
-          python -m pip install --target "$RUNNER_TEMP/cmake324" cmake==3.24.3
-      - name: Test header sets with CMake 3.24
-        shell: bash
-        run: |
-          "$RUNNER_TEMP/cmake324/cmake/data/bin/cmake" \
-            -DBINARY_DIR="$RUNNER_TEMP/header-sets" \
-            -DGENERATOR="Unix Makefiles" \
-            -P src/tests/header_sets/run.cmake
-
   build-and-test:
     strategy:
       fail-fast: false
@@ -60,11 +84,31 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build OpenMS
-        uses: ./.github/actions/build
+      - name: Install Dependencies
+        id: deps
+        uses: ./.github/actions/dependencies
         with:
           compiler: ${{ matrix.compiler }}
+
+      - name: Provide the OpenMS Core
+        id: core
+        uses: ./.github/actions/openms-core
+        with:
+          mode: ${{ inputs.core_mode }}
+          ref: ${{ inputs.core_ref || 'develop' }}
+          exact: ${{ inputs.core_exact && 'true' || 'false' }}
+          channel: ${{ inputs.core_channel || 'nightly' }}
+          version: ${{ inputs.core_version || 'latest' }}
           ssh_key: ${{ secrets.ARCHIVE_RRSYNC_SSH }}
           ssh_host: ${{ secrets.ARCHIVE_RRSYNC_HOST }}
           ssh_port: ${{ secrets.ARCHIVE_RRSYNC_PORT }}
           ssh_user: ${{ secrets.ARCHIVE_RRSYNC_USER }}
+
+      - name: Build and Test the GUI Layer
+        uses: ./.github/actions/build
+        with:
+          compiler: ${{ matrix.compiler }}
+          prefix_path: ${{ steps.core.outputs.prefix_path }};${{ steps.deps.outputs.cmake_prefix }}
+          topp_bin_dir: ${{ steps.core.outputs.bin_dir }}
+          examples_dir: ${{ steps.core.outputs.examples_dir }}
+          core_version_fullstring: ${{ steps.core.outputs.version_fullstring }}

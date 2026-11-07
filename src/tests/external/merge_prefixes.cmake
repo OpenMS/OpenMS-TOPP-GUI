@@ -14,8 +14,9 @@ cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 ###   cmake -DDEST=<new prefix> "-DSOURCES=<prefix>;<prefix>..." [-DENTRIES=<name>;...] -P merge_prefixes.cmake
 ###
 ### A directory present in more than one source becomes a real directory and is merged
-### recursively; every other entry is linked (symbolic link, or a copy where links cannot
-### be created, e.g. on Windows without the privilege). A file present in more than one
+### recursively; every other entry is linked. Where symbolic links cannot be created (Windows
+### without the privilege) a directory is recreated and its files are hard-linked, or
+### copied where that fails too. A file present in more than one
 ### source is an error: the GUI layer must not install anything the core ships.
 ### ENTRIES restricts the top level to the given names (default: everything).
 
@@ -29,10 +30,10 @@ function(_link_entry source dest)
   file(CREATE_LINK "${source}" "${dest}" RESULT _result SYMBOLIC)
   if(NOT _result EQUAL 0)
     if(IS_DIRECTORY "${source}")
-      file(COPY "${source}/" DESTINATION "${dest}")
+      file(GLOB _children RELATIVE "${source}" "${source}/*")
+      _merge("${dest}" "${source}" "${_children}")
     else()
-      get_filename_component(_dest_dir "${dest}" DIRECTORY)
-      file(COPY "${source}" DESTINATION "${_dest_dir}")
+      file(CREATE_LINK "${source}" "${dest}" COPY_ON_ERROR)
     endif()
   endif()
 endfunction()

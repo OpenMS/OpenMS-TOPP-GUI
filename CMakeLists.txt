@@ -23,13 +23,6 @@ cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 ## bumps it together with the test data.
 set(OPENMS_GUI_VERSION 3.7.0)
 
-# The vcpkg toolchain must be selected before project(). The presets set it; a
-# plain configure uses system packages and CMAKE_PREFIX_PATH.
-option(OPENMS_USE_VCPKG "Use vcpkg manifest mode for the build dependencies (Boost)." OFF)
-if(OPENMS_USE_VCPKG AND NOT CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{VCPKG_ROOT})
-  set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE FILEPATH "CMake toolchain file")
-endif()
-
 # Handle default build type
 get_property(_openms_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if(NOT _openms_multi_config AND NOT DEFINED CMAKE_BUILD_TYPE)
@@ -58,9 +51,15 @@ option(ENABLE_CLASS_TESTING "Build the class tests of the GUI library." ON)
 option(ENABLE_TOPP_TESTING "Add the tests of the GUI TOPP tools (ExecutePipeline, ImageCreator)." ON)
 option(ENABLE_PIPELINE_TESTING "Add the TOPPAS pipeline tests (ExecutePipeline on the example workflows)." ON)
 option(HAS_XSERVER "Indicates if a display is available (or QT_QPA_PLATFORM=offscreen is used). If OFF, the tests that open windows are disabled." ON)
-option(ENABLE_DOCS "Add the documentation targets (doc, doc_gui_tools, ...)." ON)
+option(ENABLE_DOCS "Add the documentation targets (doc, doc_class_only, ...)." ON)
 option(ENABLE_TUTORIALS "Build the GUI code examples of the tutorials." ON)
 option(NO_WEBENGINE_WIDGETS "Do not use QtWebEngineWidgets. Disables the JavaScript views in TOPPView." OFF)
+## The packages do not deploy QtWebEngine (its helper process and resources), so they are
+## always built without it.
+if(DEFINED PACKAGE_TYPE AND NOT "${PACKAGE_TYPE}" STREQUAL "none" AND NOT NO_WEBENGINE_WIDGETS)
+  message(STATUS "Packaging: QtWebEngineWidgets is not deployed, setting NO_WEBENGINE_WIDGETS=ON")
+  set(NO_WEBENGINE_WIDGETS ON CACHE BOOL "Do not use QtWebEngineWidgets. Disables the JavaScript views in TOPPView." FORCE)
+endif()
 option(OPENMS_TEST_INSTALLED_CONSUMER "Add a test that installs the GUI layer next to the OpenMS core and builds an external project against it." OFF)
 
 #------------------------------------------------------------------------------
@@ -121,7 +120,6 @@ set(VALID_PACKAGE_TYPES "none" # make/make install
                         "deb"  # Debian package, installed on top of the openms package
                         "rpm"  # RPM package, installed on top of the openms package
                         "pkg"  # macOS productbuild installer, installed into the OpenMS folder
-                        "dmg"  # macOS drag&drop image with self-contained app bundles
                         "nsis") # Windows installer, installed into the OpenMS installation
 set(PACKAGE_TYPE "none" CACHE STRING "Package type: ${VALID_PACKAGE_TYPES}")
 message(STATUS "Package type is '${PACKAGE_TYPE}'")
@@ -136,7 +134,7 @@ set(OPENMS_GUI_APPLICATIONS_COMPONENT GUIApplications)
 ##   SIGNING_EMAIL - Apple ID email for notarization
 ##   CPACK_PRODUCTBUILD_IDENTITY_NAME - Developer ID Installer certificate identity (for .pkg)
 ##   APPLE_APP_SPECIFIC_NOTARIZATION_PASSWORD environment variable - app-specific password
-if("${PACKAGE_TYPE}" STREQUAL "dmg" OR "${PACKAGE_TYPE}" STREQUAL "pkg")
+if("${PACKAGE_TYPE}" STREQUAL "pkg")
   if (NOT DEFINED SIGNING_IDENTITY OR "${SIGNING_IDENTITY}" STREQUAL "" OR "${SIGNING_IDENTITY}" STREQUAL "-")
     message(WARNING "Trying to create a macOS package without SIGNING_IDENTITY being set. "
                     "Using the ad hoc identity. The package will NOT be notarized.")
@@ -241,7 +239,7 @@ if (MSVC)
 endif()
 
 #------------------------------------------------------------------------------
-# Dependencies: the installed OpenMS core, Boost and Qt
+# Dependencies: the installed OpenMS core and Qt
 #------------------------------------------------------------------------------
 include(cmake/third_party_notices.cmake)
 include(cmake/find_openms.cmake)
@@ -253,6 +251,8 @@ endif()
 #------------------------------------------------------------------------------
 # The code
 #------------------------------------------------------------------------------
+## here, not in src/, so that ctest finds the tests from the top of the build tree
+enable_testing()
 add_subdirectory(src)
 
 #------------------------------------------------------------------------------
@@ -271,14 +271,14 @@ install_export_targets()
 #------------------------------------------------------------------------------
 # Installation and packaging
 #------------------------------------------------------------------------------
+## The packages install the GUI layer into the installation of the OpenMS core of the same
+## version (cmake/package_general.cmake). A plain 'cmake --install' (PACKAGE_TYPE none)
+## installs it into CMAKE_INSTALL_PREFIX, which should be the core's prefix too.
 include(cmake/third_party_licenses.cmake)
 
 if(NOT "${PACKAGE_TYPE}" STREQUAL "none")
   include(cmake/package_general.cmake)
-  if("${PACKAGE_TYPE}" STREQUAL "dmg")
-    set(CPACK_GENERATOR "DragNDrop")
-    include(cmake/package_dragndrop_dmg.cmake)
-  elseif("${PACKAGE_TYPE}" STREQUAL "pkg")
+  if("${PACKAGE_TYPE}" STREQUAL "pkg")
     set(CPACK_GENERATOR "productbuild")
     include(cmake/package_mac_productbuild.cmake)
   elseif("${PACKAGE_TYPE}" STREQUAL "rpm")
@@ -295,7 +295,8 @@ if(NOT "${PACKAGE_TYPE}" STREQUAL "none")
   include(cmake/package_components.cmake)
 endif()
 
-## share/OpenMS/THIRD-PARTY-NOTICES-GUI.txt from the license files recorded above
+## share/OpenMS/THIRD-PARTY-NOTICES-GUI.txt from the license files recorded above (and the
+## copyright file of the Debian package)
 openms_install_third_party_notices()
 
 #------------------------------------------------------------------------------
