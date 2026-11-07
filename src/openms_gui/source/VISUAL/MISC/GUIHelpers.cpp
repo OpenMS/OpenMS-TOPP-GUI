@@ -9,6 +9,7 @@
 #include <OpenMS/VISUAL/MISC/GUIHelpers.h>
 
 #include <OpenMS/CONCEPT/LogStream.h>
+#include <OpenMS/CONCEPT/VersionInfo.h>
 #include <OpenMS/FORMAT/FileNameUtils.h>
 #include <OpenMS/SYSTEM/File.h>
 #include <OpenMS/VISUAL/MISC/Qt5Port.h>
@@ -126,13 +127,30 @@ namespace OpenMS
       // we expect all unqualified urls to be file urls
       try
       {
-        std::string local_url = File::findDoc(fromQString(target));
+        std::string local_url;
+        // share/doc of the installation the data path belongs to (the GUI layer installs its
+        // documentation there, into html-gui/, also when the installation was moved)
+        const std::string installed_doc = File::getOpenMSDataPath() + "/../doc/" + fromQString(target);
+        if (File::exists(installed_doc))
+        {
+          local_url = File::absolutePath(installed_doc);
+        }
+        else
+        {
+          local_url = File::findDoc(fromQString(target));
+        }
         url_target = QUrl::fromLocalFile(toQString(local_url));
       }
       catch (Exception::FileNotFound&)
       {
-        // we fall back to the web url
-        url_target = QUrl(QString("http://www.openms.de/current_doxygen/%1").arg(target), QUrl::TolerantMode);
+        // Not installed locally: fall back to the online documentation. The archive has the same
+        // layout as an installation (html/ of OpenMS, html-gui/ of the GUI layer), per release
+        // version; development builds use the latest nightly documentation.
+        const VersionInfo::VersionDetails version = VersionInfo::getVersionStruct();
+        const QString doc_version = version.pre_release_identifier.empty()
+                                    ? QString("release/%1.%2.%3").arg(version.version_major).arg(version.version_minor).arg(version.version_patch)
+                                    : QString("nightly/latest");
+        url_target = QUrl(QString("https://archive.openms.de/openms/Documentation/%1/%2").arg(doc_version, target), QUrl::TolerantMode);
       }
     }
     else

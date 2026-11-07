@@ -172,8 +172,8 @@ namespace OpenMS
     parent->menuBar()->addMenu(m_help);
     m_help->addAction(QWhatsThis::createAction(m_help));
     m_help->addSeparator();
-    m_help->addAction("OpenMS website", []() { GUIHelpers::openURL("http://www.OpenMS.de"); });
-    m_help->addAction("Tutorials and documentation", []() { GUIHelpers::openURL("html/index.html"); })->setShortcut(Qt::Key_F1);
+    m_help->addAction("OpenMS website", []() { GUIHelpers::openURL("https://www.openms.de"); });
+    m_help->addAction("Tutorials and documentation", []() { GUIHelpers::openURL("html-gui/index.html"); })->setShortcut(Qt::Key_F1);
 
     m_help->addSeparator();
 

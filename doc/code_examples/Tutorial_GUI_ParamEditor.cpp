@@ -6,7 +6,6 @@
 #include <OpenMS/DATASTRUCTURES/Param.h>
 #include <OpenMS/FORMAT/ParamXMLFile.h>
 #include <OpenMS/SYSTEM/File.h>
-#include <OpenMS/openms_data_path.h> // exotic header for path to tutorial data
 
 #include <iostream>
 #include <QApplication>
@@ -16,14 +15,15 @@ using namespace std;
 
 Int main(int argc, const char** argv)
 {
-  std::string tutorial_data_path(OPENMS_DOC_PATH + std::string("/code_examples/"));
-    
+  // GUI_TUTORIAL_DATA_PATH: doc/code_examples/data of the source tree (set in CMakeLists.txt)
+  std::string tutorial_data_path(GUI_TUTORIAL_DATA_PATH);
+
   QApplication app(argc, const_cast<char**>(argv));
 
   Param param;
   ParamXMLFile paramFile;
 
-  paramFile.load(tutorial_data_path + "/data/Tutorial_ParamEditor.ini", param);
+  paramFile.load(tutorial_data_path + "/Tutorial_ParamEditor.ini", param);
 
   ParamEditor editor(nullptr);
   editor.load(param);

@@ -10,7 +10,6 @@
 #include <OpenMS/VISUAL/LayerDataBase.h>
 #include <OpenMS/VISUAL/Plot1DWidget.h>
 #include <OpenMS/VISUAL/Plot2DWidget.h>
-#include <OpenMS/openms_data_path.h> // exotic header for path to tutorial data
 #include <QApplication>
 
 #include <memory>
@@ -20,7 +19,8 @@ using namespace std;
 
 Int main(int argc, const char** argv)
 {
-  std::string tutorial_data_path(OPENMS_DOC_PATH + std::string("/code_examples/data/Tutorial_Spectrum1D.dta"));
+  // GUI_TUTORIAL_DATA_PATH: doc/code_examples/data of the source tree (set in CMakeLists.txt)
+  std::string tutorial_data_path(GUI_TUTORIAL_DATA_PATH + std::string("/Tutorial_Spectrum1D.dta"));
 
   QApplication app(argc, const_cast<char**>(argv));
 

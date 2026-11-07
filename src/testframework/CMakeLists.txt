@@ -10,13 +10,15 @@ project("OpenMSTestFramework")
 cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 #------------------------------------------------------------------------------
-# The class-test framework (ClassTest.h macros, FuzzyStringComparator,
-# MacrosTest.h) as its own STATIC library: standard-library only, no libOpenMS
-# headers or symbols, so the tests of every OpenMS library (incl. ones that do
-# not link libOpenMS, like OpenSwathAlgo) can use it. Library-specific behavior is
-# registered on top of it by the OpenMSTestSupport target of src/tests/class_tests,
-# which does link libOpenMS and therefore cannot live here: this directory has to stay
-# configurable on its own, which src/tests/header_sets builds it to prove.
+# The class-test framework of OpenMS (ClassTest.h macros, FuzzyStringComparator,
+# MacrosTest.h), a copy of OpenMS' src/testframework: the OpenMS installation does
+# not ship it. A STATIC library of the standard library only, used by the class tests
+# of this repository and never installed (so no install rules). The libOpenMS part of
+# the test setup is the OpenMSTestSupport target of src/tests/class_tests.
+#
+# The headers keep their OpenMS location (OpenMS/CONCEPT/ClassTest.h), so the tests
+# copied from OpenMS compile unchanged. An installed OpenMS does not carry these
+# headers, so they cannot be shadowed by those of the core.
 
 set(OpenMSTestFramework_sources
   source/CONCEPT/ClassTest.cpp
@@ -37,33 +39,9 @@ add_library(OpenMSTestFramework STATIC ${OpenMSTestFramework_sources})
 target_sources(OpenMSTestFramework PUBLIC FILE_SET HEADERS
   BASE_DIRS "${PROJECT_SOURCE_DIR}/include"
   FILES ${OpenMSTestFramework_sources_h})
-openms_validate_public_headers(${OpenMSTestFramework_sources_h})
-if(OPENMS_VERIFY_INTERFACE_HEADER_SETS)
-  set_target_properties(OpenMSTestFramework PROPERTIES VERIFY_INTERFACE_HEADER_SETS ON)
-endif()
-
 target_compile_features(OpenMSTestFramework PUBLIC cxx_std_23)
 
-openms_add_library_compiler_flags(OpenMSTestFramework)
-
-#------------------------------------------------------------------------------
-# In-repo dev tool, not shipped: EXCLUDE_FROM_ALL keeps the archive AND its
-# headers out of default installs and the NSIS/zip installers (productbuild
-# enumerates components by name, so it ignores the flag and drops both via an
-# explicit list(REMOVE_ITEM) in cmake/package_mac_productbuild.cmake);
-# `cmake --install . --component OpenMSTestFramework` (resp.
-# `--component OpenMSTestFramework_headers`) still installs them. The headers are
-# useless on their own anyway -- the target is not exported
-# (OpenMSTargets.cmake) and not in the 'library' component, so an installation
-# carries no library to link them against: the wheel builds install
-# component-wise, so an exported target would dangle and break downstream
-# find_package(OpenMS). Headers keep their historic include/OpenMS/CONCEPT/
-# location so existing includes resolve. In-tree consumers link the target
-# directly and read the headers from the source tree.
-install(TARGETS OpenMSTestFramework
-        ARCHIVE DESTINATION ${INSTALL_LIB_DIR} COMPONENT OpenMSTestFramework
-        EXCLUDE_FROM_ALL
-        FILE_SET HEADERS DESTINATION ${INSTALL_INCLUDE_DIR} COMPONENT OpenMSTestFramework_headers
-        EXCLUDE_FROM_ALL)
-
-openms_doc_path("${PROJECT_SOURCE_DIR}/include")
+## the warning and sanitizer flags of this build (cmake/compiler_flags.cmake), when there is one
+if(COMMAND openms_add_library_compiler_flags)
+  openms_add_library_compiler_flags(OpenMSTestFramework)
+endif()

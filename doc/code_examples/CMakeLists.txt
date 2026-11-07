@@ -1,47 +1,28 @@
 # Copyright (c) 2002-present, OpenMS Inc. -- EKU Tuebingen, ETH Zurich, and FU Berlin
 # SPDX-License-Identifier: BSD-3-Clause
-# 
+#
 # --------------------------------------------------------------------------
 # $Maintainer: Stephan Aiche $
 # $Authors: Stephan Aiche $
 # --------------------------------------------------------------------------
 
+# CMake sub-project for the code examples of the GUI library
 
-# CMake sub-project for OpenMS code examples
+project("OpenMS_TOPP_GUI_code_examples")
 
-project("OpenMS_code_examples")
-
-set(EXAMPLES_executables)
-
-# ensure the tutorials go into bin/
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(GUI_EXAMPLES_executables)
 
 # get the actual code examples
 include(${CMAKE_CURRENT_LIST_DIR}/executables.cmake)
 
-
-# add the targets
-foreach(i ${EXAMPLES_executables})
+# add the targets (no tests: they open windows and wait for the user)
+foreach(i ${GUI_EXAMPLES_executables})
   add_executable(${i} ${CMAKE_CURRENT_LIST_DIR}/${i}.cpp)
-  target_link_libraries(${i} OpenMS OpenMS_CLI)  # Tutorial_TOPP and Tutorial_Template derive from TOPPBase
-
-  add_test(NAME ${i}
-           COMMAND ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${i})
+  target_link_libraries(${i} OpenMS_GUI)
+  # the data the examples load, from this directory (not from the OpenMS core)
+  target_compile_definitions(${i} PRIVATE GUI_TUTORIAL_DATA_PATH="${CMAKE_CURRENT_SOURCE_DIR}/data")
 endforeach(i)
-## expect "Tutorial_Template"" to fail, since its a proper TOPP tool invoked without arguments
-## i.e. TOPPBase will print a usage() and return an error code
-set_tests_properties(Tutorial_Template PROPERTIES WILL_FAIL TRUE)
 
 # add collection target
 add_custom_target(Tutorials_build)
-add_dependencies(Tutorials_build ${EXAMPLES_executables})
-
-if(WITH_GUI)
-  # add the GUI tutorials -- no tests
-  foreach(i ${GUI_EXAMPLES_executables})
-    add_executable(${i} ${CMAKE_CURRENT_LIST_DIR}/${i}.cpp)
-    target_link_libraries(${i} OpenMS OpenMS_GUI)
-  endforeach(i)
-
-  add_dependencies(Tutorials_build ${GUI_EXAMPLES_executables})
-endif()
+add_dependencies(Tutorials_build ${GUI_EXAMPLES_executables})
