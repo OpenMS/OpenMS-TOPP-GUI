@@ -11,9 +11,9 @@ on:
         type: string
         default: ""
       core_ref:
-        description: "source: branch, tag or commit of OpenMS/OpenMS"
+        description: "source: branch, tag or commit of OpenMS/OpenMS (empty: OPENMS_CORE_DEFAULT_REF below)"
         type: string
-        default: "develop"
+        default: ""
       core_exact:
         description: "source: build the current commit of core_ref instead of taking the newest cached build of it"
         type: boolean
@@ -61,6 +61,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # The OpenMS branch the core is built from when no core_ref is given. Until
+  # OpenMS/OpenMS#10844 (which removes the GUI from OpenMS and adds the PATH lookup
+  # of TOPP tools that ExecutePipeline needs on Windows) is merged, that is its branch;
+  # afterwards set it back to develop.
+  OPENMS_CORE_DEFAULT_REF: claude/jolly-babbage-s52h8n
+
 jobs:
   build-and-test:
     strategy:
@@ -95,7 +102,7 @@ jobs:
         uses: ./.github/actions/openms-core
         with:
           mode: ${{ inputs.core_mode }}
-          ref: ${{ inputs.core_ref || 'develop' }}
+          ref: ${{ inputs.core_ref || env.OPENMS_CORE_DEFAULT_REF }}
           exact: ${{ inputs.core_exact && 'true' || 'false' }}
           channel: ${{ inputs.core_channel || 'nightly' }}
           version: ${{ inputs.core_version || 'latest' }}
