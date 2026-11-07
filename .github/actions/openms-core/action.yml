@@ -309,6 +309,11 @@ runs:
         # MinGW compilers on PATH (the build action of OpenMS sets CC/CXX as well)
         if [[ "$RUNNER_OS" == "Windows" ]]; then
           export CC=cl.exe CXX=cl.exe
+          # vcpkg builds the ports below its own directory, which is deeper here
+          # (D:\a\OpenMS-TOPP-GUI\OpenMS-TOPP-GUI\_openms_core\vcpkg) than in the
+          # OpenMS repository; the deepest object paths of aws-sdk-cpp then exceed
+          # MAX_PATH and cl.exe fails with C1083. A short build tree root avoids it.
+          options+=("-DVCPKG_INSTALL_OPTIONS=--x-buildtrees-root=C:/vcpkg-bt")
         fi
 
         cmake --preset "$preset" -B "$BUILD_DIR" "${options[@]}"
