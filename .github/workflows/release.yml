@@ -367,7 +367,8 @@ jobs:
         env:
           INSTALL_DIR: ${{ steps.core.outputs.install_dir }}
         run: |
-          if [[ -e "$INSTALL_DIR/bin/TOPPView" || -e "$INSTALL_DIR/bin/TOPPView.exe" || -e "$INSTALL_DIR/bin/TOPPView.app" ]]; then
+          # (the macOS installer has the app bundles in the root of its folder, not in bin/)
+          if [[ -e "$INSTALL_DIR/bin/TOPPView" || -e "$INSTALL_DIR/bin/TOPPView.exe" || -e "$INSTALL_DIR/TOPPView.app" ]]; then
             echo "::warning::The OpenMS installer still contains the GUI tools (an OpenMS from before the split); the smoke test of the GUI package is skipped."
             echo "skip=true" >>"$GITHUB_OUTPUT"
           else
@@ -388,13 +389,14 @@ jobs:
             sudo installer -pkg "$pkg" -target /
           done
 
-      # The add-on installer finds the OpenMS installation in the registry.
+      # The add-on installer finds the OpenMS installation in the registry. Silent mode
+      # needs the install mode of that installation (all users, see openms-core).
       - name: Install the GUI Package (Windows)
         if: runner.os == 'Windows' && steps.presplit.outputs.skip == 'false'
         shell: pwsh
         run: |
           $exe = Get-ChildItem "$env:RUNNER_TEMP\gui-package\OpenMS-GUI-*.exe" | Select-Object -First 1
-          $p = Start-Process -FilePath $exe.FullName -ArgumentList '/S' -Wait -PassThru
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList '/S', '/allusers' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "The GUI installer failed with exit code $($p.ExitCode)" }
 
       - name: Run the GUI Tools
@@ -405,17 +407,18 @@ jobs:
         run: |
           set -euo pipefail
           bin="$INSTALL_DIR/bin"
-          # the executables of the GUI applications (inside the bundles on macOS)
+          # the executables of the GUI applications (on macOS inside the bundles, which the
+          # package installs into the root of the OpenMS folder, next to bin/)
           app() {
             local candidate
-            for candidate in "$bin/$1.app/Contents/MacOS/$1" "$bin/$1.exe" "$bin/$1"; do
+            for candidate in "$INSTALL_DIR/$1.app/Contents/MacOS/$1" "$bin/$1.exe" "$bin/$1"; do
               if [[ -f "$candidate" ]]; then
                 echo "$candidate"
                 return
               fi
             done
-            echo >&2 "ERROR: $1 is not installed in $bin"
-            ls -l "$bin" >&2
+            echo >&2 "ERROR: $1 is not installed in $INSTALL_DIR"
+            ls -l "$INSTALL_DIR" "$bin" >&2
             return 1
           }
           for tool in TOPPView ExecutePipeline; do

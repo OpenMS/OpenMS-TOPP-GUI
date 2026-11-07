@@ -115,10 +115,18 @@ elseif(APPLE)
   set(PRE_EXCLUDE "/usr/lib" "/System/")
   set(POST_EXCLUDE)
 endif()
-## the build tree of this project: OpenMS_GUI is installed by library_gui
-_openms_gui_regex_escape(_build_dir_regex "${PROJECT_BINARY_DIR}")
 list(APPEND PRE_EXCLUDE ${_core_pre_exclude})
-list(APPEND POST_EXCLUDE ${_core_post_exclude} "^${_build_dir_regex}/")
+list(APPEND POST_EXCLUDE ${_core_post_exclude})
+## the build tree of this project: OpenMS_GUI is installed by library_gui. Not on Windows:
+## there the build copies the Qt DLLs next to the binaries (add_library_macros.cmake), and a
+## DLL in the folder of the binary is resolved there first, so excluding the build tree
+## would drop Qt from the package (OpenMS_GUI is excluded by name above). These copies are
+## then also the first place searched for the dependencies of the Qt plugins (below):
+## the same DLL found in two folders is a fatal conflict.
+if(NOT WIN32)
+  _openms_gui_regex_escape(_build_dir_regex "${PROJECT_BINARY_DIR}")
+  list(APPEND POST_EXCLUDE "^${_build_dir_regex}/")
+endif()
 
 if(OPENMS_GUI_BUNDLES_QT)
   ## Where the dependencies are looked for: the prefixes of CMAKE_PREFIX_PATH and the Qt
@@ -126,6 +134,9 @@ if(OPENMS_GUI_BUNDLES_QT)
   list(TRANSFORM CMAKE_PREFIX_PATH APPEND "/bin" OUTPUT_VARIABLE _dep_bin_dirs)
   list(TRANSFORM CMAKE_PREFIX_PATH APPEND "/lib" OUTPUT_VARIABLE _dep_lib_dirs)
   set(RUNTIME_DEP_SEARCH_DIRS ${_dep_bin_dirs} ${_dep_lib_dirs})
+  if(WIN32)
+    list(PREPEND RUNTIME_DEP_SEARCH_DIRS "$<TARGET_FILE_DIR:OpenMS_GUI>")
+  endif()
   if(QT6_INSTALL_PREFIX)
     list(APPEND RUNTIME_DEP_SEARCH_DIRS "${QT6_INSTALL_PREFIX}/bin" "${QT6_INSTALL_PREFIX}/lib")
   endif()

@@ -70,6 +70,13 @@ cmake -S OpenMS-TOPP-GUI -B OpenMS-TOPP-GUI-build -G Ninja \
 cmake --build OpenMS-TOPP-GUI-build -j$(nproc)
 ```
 
+To install, install into the prefix of the OpenMS installation it was built against (see
+*Layered installation* above):
+
+```bash
+cmake --install OpenMS-TOPP-GUI-build --prefix "<OpenMS prefix>"
+```
+
 On Linux, the distribution's Qt works (Ubuntu: `qt6-base-dev libqt6svg6-dev libqt6opengl6-dev`, see
 `tools/ci/deps-ubuntu.sh`).
 
@@ -79,6 +86,7 @@ Important CMake options:
 |---|---|---|
 | `ENABLE_CLASS_TESTING`, `ENABLE_TOPP_TESTING`, `ENABLE_PIPELINE_TESTING` | `ON` | class tests of the GUI library, tests of the GUI TOPP tools, TOPPAS pipeline tests |
 | `OPENMS_TOPP_BIN_DIR` | `bin/` of the found OpenMS | where `FuzzyDiff` and the TOPP tools of OpenMS are; tests that need them are left out when they are missing (the SDK has no TOPP tools) |
+| `OPENMS_EXAMPLES_DIR` | `share/OpenMS/examples` of the found OpenMS | example workflows and data of OpenMS for the pipeline tests; they are left out when there are none (the SDK has no examples) |
 | `HAS_XSERVER` | `ON` | `OFF` leaves out the tests that open windows |
 | `NO_WEBENGINE_WIDGETS` | `OFF` | build without Qt WebEngine |
 | `ENABLE_DOCS` | `ON` | documentation targets (`doc`), if doxygen is found |
@@ -97,7 +105,8 @@ The tests set `QT_QPA_PLATFORM=offscreen` themselves, so no display is needed. T
 ExecutePipeline and ImageCreator compare against reference files with `FuzzyDiff` and the pipeline
 tests run TOPP tools, both from `OPENMS_TOPP_BIN_DIR`: point it to the `bin/` of an OpenMS
 installation with TOPP tools when building against the SDK. The pipeline tests also use the example
-workflows in `share/OpenMS/examples/TOPPAS` of that installation.
+workflows and data in `OPENMS_EXAMPLES_DIR` (default: `share/OpenMS/examples` of the found OpenMS):
+the SDK has none, so point it to the `share/OpenMS/examples` of a full OpenMS installation as well.
 
 ## Documentation
 
@@ -115,8 +124,14 @@ copy at `https://archive.openms.de/openms/Documentation/<release/version|nightly
 
 ```bash
 cmake -S OpenMS-TOPP-GUI -B build-package -DPACKAGE_TYPE=deb -DCMAKE_PREFIX_PATH="..."
+cmake --build build-package -j$(nproc)
 cmake --build build-package --target dist
 ```
+
+`dist` only packages what is built, so build first. Pass `-DOPENMS_CORE_VERSION_FULLSTRING=<version of
+the OpenMS package>` (e.g. `3.7.0-pre-nightly-2026-11-06`) when the OpenMS CMake package does not provide
+it: it is the version the package requires (Debian: `openms (= 3.7.0~nightly.2026.11.06)`) and part of
+its file name.
 
 The packages are add-ons to the OpenMS packages of the same version, named like them with
 `OpenMS-GUI-` in place of `OpenMS-` (e.g. `OpenMS-GUI-<version>-Win64.exe`). They contain the GUI

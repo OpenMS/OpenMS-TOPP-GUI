@@ -469,9 +469,11 @@ runs:
         INSTALLER_NAME: ${{ steps.sdk-resolve.outputs.installer_name }}
       run: |
         $target = 'C:\OpenMS-core'
-        # NSIS: /S silent, /D the folder (last, unquoted)
+        # NSIS: /S silent, which needs the install mode (NsisMultiUser): /allusers, so
+        # that the GUI installer finds the installation under HKLM; /D the folder
+        # (last, unquoted)
         $p = Start-Process -FilePath (Join-Path $env:DOWNLOAD_DIR $env:INSTALLER_NAME) `
-               -ArgumentList '/S', "/D=$target" -Wait -PassThru
+               -ArgumentList '/S', '/allusers', "/D=$target" -Wait -PassThru
         if ($p.ExitCode -ne 0) { throw "The OpenMS installer failed with exit code $($p.ExitCode)" }
         if (-not (Test-Path (Join-Path $target 'bin'))) { throw "The OpenMS installer left no $target\bin" }
         "install_dir=C:/OpenMS-core" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
