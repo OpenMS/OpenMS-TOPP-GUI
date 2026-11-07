@@ -23,13 +23,14 @@
 
 # Only the toolchain of this build is forwarded to the consumer, as a consumer building
 # with the same compiler and dependency provider would pass it; everything about OpenMS
-# comes from the installed packages.
+# comes from the installed packages. OpenMP_ROOT is part of it: an OpenMS built with
+# Homebrew's keg-only libomp needs it in every consumer (find_dependency(OpenMP)).
 set(_configure_args)
 foreach(_var IN ITEMS
     CMAKE_TOOLCHAIN_FILE VCPKG_INSTALLED_DIR VCPKG_TARGET_TRIPLET VCPKG_HOST_TRIPLET
     CMAKE_CXX_COMPILER CMAKE_MAKE_PROGRAM CMAKE_CXX_COMPILER_LAUNCHER
     CMAKE_MSVC_RUNTIME_LIBRARY CMAKE_OSX_ARCHITECTURES CMAKE_OSX_DEPLOYMENT_TARGET
-    CMAKE_OSX_SYSROOT)
+    CMAKE_OSX_SYSROOT OpenMP_ROOT)
   if(DEFINED ${_var} AND NOT "${${_var}}" STREQUAL "")
     string(REPLACE ";" "$<SEMICOLON>" _value "${${_var}}")
     list(APPEND _configure_args "-D${_var}=${_value}")
