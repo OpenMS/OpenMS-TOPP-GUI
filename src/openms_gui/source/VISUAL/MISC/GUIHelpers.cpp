@@ -128,14 +128,19 @@ namespace OpenMS
       try
       {
         std::string local_url;
-        // share/doc of the installation the data path belongs to (the GUI layer installs its
-        // documentation there, into html-gui/, also when the installation was moved)
-        const std::string installed_doc = File::getOpenMSDataPath() + "/../doc/" + fromQString(target);
-        if (File::exists(installed_doc))
+        // The GUI layer installs its documentation (html-gui/) into share/doc of the OpenMS
+        // installation, next to bin/ and share/OpenMS (also when the installation was moved).
+        // In a build tree it is in <build>/doc.
+        const std::string app_dir = fromQString(QCoreApplication::applicationDirPath());
+        for (const std::string& doc_dir : {app_dir + "/../share/doc/", File::getOpenMSDataPath() + "/../doc/", app_dir + "/../doc/"})
         {
-          local_url = File::absolutePath(installed_doc);
+          if (File::readable(doc_dir + fromQString(target)))
+          {
+            local_url = File::absolutePath(doc_dir + fromQString(target));
+            break;
+          }
         }
-        else
+        if (local_url.empty())
         {
           local_url = File::findDoc(fromQString(target));
         }

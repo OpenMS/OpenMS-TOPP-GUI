@@ -1,0 +1,350 @@
+// Copyright (c) 2002-present, OpenMS Inc. -- EKU Tuebingen, ETH Zurich, and FU Berlin
+// SPDX-License-Identifier: BSD-3-Clause
+//
+// --------------------------------------------------------------------------
+// $Maintainer: Chris Bielow $
+// $Authors: Marc Sturm, Mathias Walzer, Chris Bielow $
+// --------------------------------------------------------------------------
+
+#include <OpenMS/APPLICATIONS/ToolHandler.h>
+#include <OpenMS/DATASTRUCTURES/StringUtils.h>
+#include <OpenMS/SYSTEM/File.h>
+#include <OpenMS/SYSTEM/SystemSettings.h>
+
+#include <OpenMS/FORMAT/XMLFile.h>
+#include <OpenMS/FORMAT/ParamXMLFile.h>
+#include <OpenMS/SYSTEM/ExternalProcess.h>
+
+#include <cstdlib>
+#include <iostream>
+#include <fstream>
+#include <sstream>
+
+using namespace std;
+using namespace OpenMS;
+using namespace Internal;
+
+namespace
+{
+  /// Set an environment variable, overwriting any existing value.
+  void setEnvVar(const char* name, const char* value)
+  {
+#ifdef _WIN32
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 1);
+#endif
+  }
+} // namespace
+
+void convertINI2HTML(const Param& p, ostream& os)
+{
+  os << "<div class=\"ini_global\">\n";
+  os << "<div class=\"legend\">\n";
+  os << "<b>Legend:</b><br>\n";
+  os << " <div class=\"item item_required\">required parameter</div>\n";
+  os << " <div class=\"item item_advanced\">advanced parameter</div>\n";
+  os << "</div>\n";
+  os << "<div class=\"ini_description\">\n";
+  os << "<p>This section lists all parameters supported by the tool. Parameters are organized into hierarchical subsections that group related settings together. Subsections may contain further subsections or individual parameters.</p>\n";
+  os << "<p>Each parameter entry contains the following information:</p>\n";
+  os << "<ul>\n";
+  os << "<li><b>Name</b>  The identifier used in configuration files and on the command line.</li>\n";
+  os << "<li><b>Default value</b>  The value used if the parameter is not explicitly specified.</li>\n";
+  os << "<li><b>Description</b>  A short explanation describing the purpose and behavior of the parameter.</li>\n";
+  os << "<li><b>Tags</b>  Additional metadata associated with the parameter.</li>\n";
+  os << "<li><b>Restrictions</b>  Allowed value ranges for numeric parameters or valid options for string parameters.</li>\n";
+  os << "</ul>\n";
+  os << "<p><b>Parameter tags</b> provide additional information about how a parameter is used. ";
+  os << "Some tags indicate whether a parameter is required or intended for advanced configuration, ";
+  os << "while others may be used internally by OpenMS or workflow tools.</p>\n";
+  os << "<p>Parameters highlighted as <span class=\"item_required\">required</span> must be specified for the tool to run successfully. Parameters marked as <span class=\"item_advanced\">advanced</span> allow fine-tuning of algorithm behavior and are typically not needed for standard workflows.</p>\n";
+  os << "</div>\n";
+
+  Param::ParamIterator it = p.begin();
+  std::string indentation = "  ";
+
+  while (it != p.end())
+  {
+    string key = it.getName();
+
+    //write opened/closed nodes
+    const std::vector<Param::ParamIterator::TraceInfo>& trace = it.getTrace();
+    for (std::vector<Param::ParamIterator::TraceInfo>::const_iterator it2 = trace.begin(); it2 != trace.end(); ++it2)
+    {
+      if (it2->opened) //opened node
+      {
+        std::string d = it2->description;
+        StringUtils::substitute(d, "\n", "<br>");
+        os << indentation
+           << R"(<div class="node"><span class="node_name">)"
+           // TODO replace/remove weird "(TOPPAS) instance 1" nodes that only confuse people.
+           << (StringUtils::fillLeft(std::string(), '+', (UInt) indentation.size() / 2) + it2->name)
+           << "</span><span class=\"node_description\">"
+           << (d)
+           << "</span></div>"
+           << "\n";
+        indentation += "  ";
+      }
+      else //closed node
+      {
+        indentation.resize(indentation.size() - 2);
+        //os << indentation << "</div>" << "\n";
+      }
+    }
+
+    //write item
+    std::string s_attr;
+    std::string s_req;
+    if (it->tags.find("advanced") != it->tags.end())
+      s_attr += " item_advanced"; // optionally add advanced class
+    if (it->tags.find("required") != it->tags.end())
+      s_req += " item_required"; // optionally add required class
+    ParamValue::ValueType value_type = it->value.valueType();
+    //write opening tag
+    os << indentation
+       << "<div class=\"item"
+       << s_attr
+       << "\"><span class=\"item_name"
+       << s_req
+       << "\" style=\"padding-left:"
+       << indentation.size() * 4
+       << "px;\">"
+       << (it->name)
+       << "</span><span class=\"item_value\">"
+       << it->value.toString()
+       << "</span>"
+       << "\n";
+
+    //replace all critical characters in description
+    std::string d = it->description;
+    StringUtils::substitute(d, "\n", "<br>");
+    os << "<span class=\"item_description\">" << (d) << "</span>";
+
+    //tags
+    std::string list;
+    for (auto tag_it = it->tags.begin(); tag_it != it->tags.end(); ++tag_it)
+    {
+      if (*tag_it == "advanced")
+        continue; // do not list "advanced" or "required" (this is done by color coding)
+      if (*tag_it == "required")
+        continue;
+      if (!list.empty())
+        list += ", ";
+      list += *tag_it;
+    }
+    os << "<span class=\"item_tags\">" << (list) << "</span>";
+
+    //restrictions
+    std::string restrictions;
+    switch (value_type)
+    {
+    case ParamValue::INT_VALUE:
+    case ParamValue::INT_LIST:
+    {
+      // TODO think about doing the same infinity replacement
+      // for default values. A single ":" looks weird.
+      bool min_set = (it->min_int != -numeric_limits<Int>::max());
+      bool max_set = (it->max_int != numeric_limits<Int>::max());
+      if (max_set || min_set)
+      {
+        if (min_set)
+          restrictions += StringUtils::toStr(it->min_int);
+        else
+          restrictions += "-&#8734;"; // infinity symbol
+        restrictions += ':';
+        if (max_set)
+          restrictions += StringUtils::toStr(it->max_int);
+        else
+          restrictions += "&#8734;";
+      }
+    }
+    break;
+
+    case ParamValue::DOUBLE_VALUE:
+    case ParamValue::DOUBLE_LIST:
+    {
+      bool min_set = (it->min_float != -numeric_limits<double>::max());
+      bool max_set = (it->max_float != numeric_limits<double>::max());
+      if (max_set || min_set)
+      {
+        if (min_set)
+          restrictions += StringUtils::toStr(it->min_float);
+        else
+          restrictions += "-&#8734;"; // infinity symbol
+        restrictions += ':';
+        if (max_set)
+          restrictions += StringUtils::toStr(it->max_float);
+        else
+          restrictions += "&#8734;";
+      }
+    }
+    break;
+
+    case ParamValue::STRING_VALUE:
+    case ParamValue::STRING_LIST:
+      if (!it->valid_strings.empty())
+      {
+        // make sure browsers can word wrap with additional whitespace
+        // TODO: If param name is *modification* just add a link to
+        //  a page with all modifications otherwise you get a HUGE list.
+        //  Also think about a different separator, in case the restrictions have commas.
+        restrictions = StringUtils::concatenate(it->valid_strings, ", ");
+      }
+      else if (value_type == ParamValue::STRING_VALUE)
+      {
+        // Issue #8475: Flag parameters are written as type="bool" in INI, which loads
+        // as STRING_VALUE with no valid_strings. Detect these by checking if value is boolean.
+        std::string val = it->value.toString();
+        if (val == "true" || val == "false")
+        {
+          restrictions = "(flag)";
+        }
+      }
+      break;
+
+    default:
+      break;
+    }
+    if (restrictions.empty())
+      restrictions = " "; // create content, such that the cell gets an underline
+
+    os << "<span class=\"item_restrictions\">" << restrictions << "</span>";
+
+    os << "</div>"; // end div item
+
+    ++it;
+  }
+
+  os << "</div>\n"; // end global div
+}
+
+/// Writes output/<prefix><tool>.cli (the --help output of each tool) and, for tools that support
+/// -write_ini, output/<prefix><tool>.html (their INI parameters).
+bool generate(const ToolListType& tools, const std::string& prefix, const std::string& binary_directory)
+{
+  // Add an environment variable (used by each TOPP tool to determine width of help text (see TOPPBase))
+  setEnvVar("COLUMNS", "110"); 
+  // Add Global environment variable to suppress stty errors
+  setEnvVar("TERM", "dumb");
+  setEnvVar("STTY", "/bin/true"); 
+  
+  bool errors_occured = false;
+  for (ToolListType::const_iterator it = tools.begin(); it != tools.end(); ++it)
+  {
+    std::string command = binary_directory + it->first;
+#if defined(__APPLE__)
+    if (it->first == "TOPPView" || it->first == "TOPPAS")
+    {
+      command = binary_directory + it->first + ".app/Contents/MacOS/" + it->first;
+    }
+#endif
+#ifdef OPENMS_WINDOWSPLATFORM
+    command += ".exe"; // otherwise File::exists() will fail
+#endif
+
+    ofstream f((std::string("output/") + prefix + it->first + ".cli").c_str());
+    if (!File::exists(command))
+    {
+      stringstream ss;
+      ss << "Errors occurred while generating the command line documentation for " << it->first << "!" << endl;
+      ss << "Tool could not be found at '" << command << "'\n " << command << endl;
+      f << ss.str();
+      cerr << ss.str();
+      errors_occured = true;
+      f.close();
+      continue;
+    }
+    else
+    {
+      ExternalProcess ep([&](const std::string& s) { f << s; },
+                         [&](const std::string& s) { f << s; });
+      std::string error_msg;
+      if (ep.run(command, std::vector<std::string>{"--help"}, "", false, error_msg, ExternalProcess::IO_MODE::READ_WRITE)
+            != ExternalProcess::RETURNSTATE::SUCCESS)
+      { // error while generation cli docu
+        stringstream ss;
+        ss << "Errors occurred while generating the command line documentation for " << it->first << "!" << endl;
+        ss << "Output was: \n";
+        ep.setCallbacks([&](const std::string& s) { ss << s; }, [&](const std::string& s) { ss << s; });
+        ep.run(command, std::vector<std::string>{"--help"}, "", false, error_msg, ExternalProcess::IO_MODE::READ_WRITE);
+        ss << "\nCommand line was: \n " << command << endl;
+        f << ss.str();
+        cerr << ss.str();
+        errors_occured = true;
+        f.close();
+        continue;
+      }
+    }
+    f.close();
+
+    //////
+    // get the INI file and convert it into HTML
+    //////
+    if (it->first != "TOPPView" && // do not support -write_ini
+        it->first != "TOPPAS")
+    {
+      std::string tmp_file = SystemSettings::getTempDirectory() + "/" + File::getUniqueName() + "_" + it->first + ".ini";
+      const std::vector<std::string> ini_command_args = {"-write_ini", tmp_file};
+
+      ExternalProcess ep([&](const std::string& s) { f << s; }, [&](const std::string& s) { f << s; });
+      std::string error_msg;
+      if (ep.run(command, ini_command_args, "", false, error_msg,
+                 ExternalProcess::IO_MODE::READ_WRITE)
+            != ExternalProcess::RETURNSTATE::SUCCESS
+          || ! File::exists(tmp_file))
+      { // error while generation cli docu
+        std::cerr << "Errors occurred while writing ini file for " << it->first << "!" << std::endl;
+        std::string args_str;
+        for (const auto& a : ini_command_args) args_str += " " + a;
+        std::cerr << "Command line was: \n " << command << args_str << std::endl;
+        errors_occured = true;
+        continue;
+      }
+
+      // load content of written ini file
+      Param p;
+      ParamXMLFile pf;
+      pf.load(tmp_file, p);
+      File::remove(tmp_file);
+      ofstream f_html((std::string("output/") + prefix + it->first + ".html").c_str());
+      convertINI2HTML(p, f_html);
+      f_html.close();
+    }
+  }
+  return errors_occured;
+}
+
+int main(int argc, char** argv)
+{
+  if (argc != 2)
+  {
+    cerr << "Please specify the path where the GUI tools are located." << endl;
+    return EXIT_FAILURE;
+  }
+
+  std::string binary_directory = StringUtils::ensureLastChar(argv[1], '/');
+
+  if (!File::exists(binary_directory))
+  {
+    cerr << "The given binary directory does not exist. Aborting." << endl;
+    return EXIT_FAILURE;
+  }
+
+  // The tools of this repository whose pages include generated documentation (see the @page
+  // blocks in src/openms_gui/source/VISUAL/APPLICATIONS/GUITOOLS). INIFileEditor has none.
+  // ExecutePipeline and ImageCreator are TOPP tools (OpenMS-GUI.tsv); TOPPView and TOPPAS do
+  // not support -write_ini, generate() skips the INI part for them.
+  ToolListType gui_tools;
+  for (const std::string& name : {"ExecutePipeline", "ImageCreator", "TOPPAS", "TOPPView"})
+  {
+    gui_tools[name] = Internal::ToolDescription();
+  }
+
+  if (generate(gui_tools, "TOPP_", binary_directory))
+  {
+    cerr << "Errors occurred while generating the command line documentation for some of the GUI tools." << endl;
+    return EXIT_FAILURE;
+  }
+  return EXIT_SUCCESS;
+}

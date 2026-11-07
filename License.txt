@@ -33,20 +33,22 @@ NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
 DAMAGE.
 
-The source code of OpenMS is available via our homepage
-http://www.OpenMS.de
+The source code of the OpenMS GUI tools is available at
+https://github.com/OpenMS/OpenMS-TOPP-GUI, that of OpenMS via
+our homepage https://www.openms.de
 
-Third-party software. The OpenMS installers and the pyOpenMS
-wheels contain third-party software, each part under its own
-license. THIRD-PARTY-NOTICES.txt in the share/OpenMS folder of
-an installation (pyopenms/share/OpenMS in a pyOpenMS wheel)
-lists that software and gives its license, copyright and
-notice texts. The files themselves are in share/OpenMS/LICENSES
-and in the tool folders under share/OpenMS/THIRDPARTY.
+Third-party software. The installers of the OpenMS GUI tools
+contain the Qt libraries and plugins (https://www.qt.io),
+licensed under the GNU Lesser General Public License v3.0
+(LGPL-3.0-only), and on macOS the libraries Qt depends on;
+the Linux packages use the Qt of the distribution instead.
+THIRD-PARTY-NOTICES-GUI.txt in the share/OpenMS folder of an
+installation lists that software and gives its license,
+copyright and notice texts; the license files are in
+share/OpenMS/LICENSES. The Qt source code is available at
+https://download.qt.io/archive/qt/.
 
-The OpenMS source code contains third-party code too, each part
-with its license file: the libraries in src/openms/extern and
-src/openms/thirdparty, and the CMake modules
-GetGitRevisionDescription and findCppCheck
+The source code contains third-party code too: the CMake module
+GetGitRevisionDescription
 (https://github.com/rpavlik/cmake-modules, Boost Software
 License 1.0, http://www.boost.org/LICENSE_1_0.txt).

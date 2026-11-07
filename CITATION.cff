@@ -1,9 +1,9 @@
 cff-version: 1.2.0
-message: "If you use OpenMS in your research, please cite us using the metadata from this file."
-title: "OpenMS"
+message: "If you use the OpenMS GUI tools (TOPPView, TOPPAS, INIFileEditor) in your research, please cite OpenMS using the metadata from this file."
+title: "OpenMS-TOPP-GUI: the graphical tools of OpenMS"
 type: software
-url: "https://github.com/OpenMS/OpenMS"
-repository-code: "https://github.com/OpenMS/OpenMS"
+url: "https://www.openms.de"
+repository-code: "https://github.com/OpenMS/OpenMS-TOPP-GUI"
 license: BSD-3-Clause
 preferred-citation:
   type: article

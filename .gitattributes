@@ -13,8 +13,11 @@
 # if the windows CR byte is added
 *.mzML binary
 *.mzXML binary
-
-.github/workflows/*.lock.yml linguist-generated=true merge=ours
+# reference images of the ImageCreator tests, application icons, the UTF-16 registry file in tools/
+*.bmp binary
+*.ico binary
+*.icns binary
+*.reg binary
 
 # git archive fills in the commit and its release tag, so that a build from an archive (the
 # Release workflow's source tarball, GitHub's source archives) knows its version (CMakeLists.txt).

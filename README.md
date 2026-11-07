@@ -61,7 +61,7 @@ Requirements:
   `WITH_GUI=ON` are refused at configure time).
 - Qt 6.1 or newer: Core, Gui, Widgets, Svg, OpenGLWidgets (macOS also PrintSupport); WebEngineWidgets
   optional (JavaScript views of TOPPView; `-DNO_WEBENGINE_WIDGETS=ON` builds without it).
-- Boost 1.81 or newer (headers), CMake 3.24 or newer, a C++23 compiler (as for OpenMS).
+- CMake 3.24 or newer, a C++23 compiler (as for OpenMS).
 - Optional: doxygen for the documentation.
 
 ```bash
@@ -84,7 +84,7 @@ Important CMake options:
 | `ENABLE_DOCS` | `ON` | documentation targets (`doc`), if doxygen is found |
 | `OPENMS_DOXYGEN_TAGFILE` | found `share/doc/OpenMS.tag` | tag file of the OpenMS documentation (`<file>=<url>`), for links to TOPP tools and OpenMS classes |
 | `ENABLE_TUTORIALS` | `ON` | GUI code examples (`Tutorials_build`) |
-| `PACKAGE_TYPE` | `none` | `deb`, `rpm`, `pkg`, `dmg` or `nsis` to build an installer with the target `dist` |
+| `PACKAGE_TYPE` | `none` | `deb`, `rpm`, `pkg` or `nsis` to build an installer with the target `dist` |
 | `OPENMS_CORE_VERSION_FULLSTRING` | | full version string of the OpenMS core, for the package names when the OpenMS CMake package does not provide it |
 
 ## Testing

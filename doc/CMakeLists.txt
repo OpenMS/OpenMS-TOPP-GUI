@@ -40,14 +40,13 @@ elseif(ENABLE_DOCS)
   ## doxygen links @ref TOPP_<tool> and the classes of the OpenMS core through the tag file of
   ## the core documentation (OpenMS.tag, installed into share/doc of an OpenMS installation).
   ## Without it these references stay plain text and doxygen warns about them.
-  set(_core_tagfile "${OPENMS_DATA_DIR}/../doc/OpenMS.tag")
+  set(_core_tagfile "${OPENMS_DOC_DIR}/OpenMS.tag")
   if(OPENMS_PACKAGE_VERSION_FULLSTRING STREQUAL OPENMS_PACKAGE_VERSION)
     set(_core_doc_url "https://archive.openms.de/openms/Documentation/release/${OPENMS_PACKAGE_VERSION}/html")
   else()
     set(_core_doc_url "https://archive.openms.de/openms/Documentation/nightly/latest/html")
   endif()
-  if(EXISTS "${_core_tagfile}")
-    get_filename_component(_core_tagfile "${_core_tagfile}" ABSOLUTE)
+  if(OPENMS_DOC_DIR AND EXISTS "${_core_tagfile}")
     set(_default_tagfile "${_core_tagfile}=${_core_doc_url}")
   else()
     set(_default_tagfile "")
@@ -106,13 +105,16 @@ elseif(ENABLE_DOCS)
   configure_file(${PROJECT_SOURCE_DIR}/doxygen/Doxyfile.in ${PROJECT_BINARY_DIR}/doxygen/Doxyfile)
 
   #------------------------------------------------------------------------------
-  # Run time environment of the documenters: the GUI library needs a QApplication
-  # (offscreen without a display), the GUI TOPP tools need the tool registry of
-  # this build, and on Windows the DLLs of the OpenMS core and Qt must be found.
+  # Run time environment of the documenters, as for the tests (src/tests/CMakeLists.txt):
+  # the GUI library needs a QApplication (offscreen without a display), the GUI TOPP
+  # tools need the tool registry of this build, libOpenMS the share/OpenMS of the core
+  # (OPENMS_DATA_PATH, its last resort, e.g. for a moved SDK), and on Windows the DLLs
+  # of this build, the OpenMS core and Qt, and the Qt plugins must be found.
   #------------------------------------------------------------------------------
   list(TRANSFORM CMAKE_PREFIX_PATH APPEND "/bin" OUTPUT_VARIABLE DEP_BIN_DIRS)
   list(TRANSFORM CMAKE_PREFIX_PATH APPEND "/lib" OUTPUT_VARIABLE DEP_LIB_DIRS)
-  set(_doc_path_dirs ${CMAKE_RUNTIME_OUTPUT_DIRECTORY} ${OPENMS_BIN_DIR} ${DEP_BIN_DIRS} ${DEP_LIB_DIRS})
+  set(_doc_path_dirs "$<TARGET_FILE_DIR:OpenMS_GUI>" ${OPENMS_BIN_DIR} ${OPENMS_LIB_DIR}
+                     "$<TARGET_FILE_DIR:Qt6::Core>" ${DEP_BIN_DIRS} ${DEP_LIB_DIRS})
   if(WIN32)
     string(REPLACE ";" "\\;" _doc_path "${_doc_path_dirs};$ENV{PATH}")
   else()
@@ -126,7 +128,12 @@ elseif(ENABLE_DOCS)
   set(_doc_env ${CMAKE_COMMAND} -E env
                "PATH=${_doc_path}"
                "QT_QPA_PLATFORM=${_doc_qpa}"
-               "OPENMS_TOOL_REGISTRY_PATH=${OPENMS_TOOL_REGISTRY_BUILD_DIR}")
+               "OPENMS_TOOL_REGISTRY_PATH=${OPENMS_TOOL_REGISTRY_BUILD_DIR}"
+               "OPENMS_DATA_PATH=${OPENMS_DATA_DIR}")
+  ## the build tree has no qt.conf: point Qt to its plugins (<plugins>/platforms/qwindows.dll)
+  if(WIN32 AND TARGET Qt6::QWindowsIntegrationPlugin)
+    list(APPEND _doc_env "QT_PLUGIN_PATH=$<PATH:GET_PARENT_PATH,$<TARGET_FILE_DIR:Qt6::QWindowsIntegrationPlugin>>")
+  endif()
 
   # where the GUI tools are (with multi-config generators, in a subdirectory per configuration)
   set(_gui_bin_dir "$<TARGET_FILE_DIR:ExecutePipeline>")

@@ -1,0 +1,42 @@
+
+Glossary:
+OpenMS - Name of the project and our C++ library
+OpenMS-TOPP-GUI - this repository: the Qt GUI layer of OpenMS (OpenMS_GUI library and the GUI tools)
+TOPP - "The OpenMS PiPeline", a collection of chainable tools for flexible HPLC/MS workflows
+TOPPAS - "The OpenMS PiPeline Assistant", a graphical tool to interactively build and run HPLC/MS workflows
+TOPPView - Versatile viewer for HPLC/MS data
+INI file - parameter configuration file, holding custom parameter settings for TOPP tools
+INIFileEditor - graphical parameter editor for INI files
+PR - Pull Request (on GitHub), i.e. integration of a new feature or bugfix
+#<number>, e.g. #12 - a reference to an issue or pull request of this repository on GitHub, visit e.g.
+  https://github.com/OpenMS/OpenMS-TOPP-GUI/pull/XXXX (replace XXXX with number of interest) for details;
+  OpenMS/OpenMS#<number> refers to the OpenMS repository
+
+Each release of OpenMS-TOPP-GUI is built against, and requires, the OpenMS release of the same version.
+Changes of the GUI tools before 3.7.0 are listed in the CHANGELOG of OpenMS (https://github.com/OpenMS/OpenMS).
+
+
+
+------------------------------------------------------------------------------------------
+----                         OpenMS-TOPP-GUI 3.7.0     (under development)            ----
+----                         requires OpenMS 3.7.0                                    ----
+------------------------------------------------------------------------------------------
+
+Build System:
+  - BREAKING: The GUI layer of OpenMS (the OpenMS_GUI library, TOPPView, TOPPAS, INIFileEditor and the TOPP
+    tools that need Qt, ExecutePipeline and ImageCreator) moved from the OpenMS repository into this repository,
+    with the history of its files. It is built against an installed OpenMS of the same version (the OpenMS SDK
+    or an installation built from source without the former WITH_GUI option); OpenMS itself no longer depends
+    on Qt.
+  - The GUI layer is installed into the OpenMS installation: its CMake package OpenMSGUI (target
+    OpenMS::OpenMS_GUI) is also found through find_package(OpenMS COMPONENTS GUI), and its tool registry
+    share/OpenMS/TOOLS/OpenMS-GUI.tsv adds ExecutePipeline and ImageCreator to the TOPP tools of OpenMS.
+  - Installers of their own, as add-ons to the OpenMS installers of the same version:
+    OpenMS-GUI-<version>-Win64.exe, OpenMS-GUI-<version>-macOS-<Silicon|Intel>.pkg and the Linux packages
+    openms-gui (.deb, .rpm), which depend on the openms package.
+
+Documentation:
+  - The documentation of the GUI tools, the TOPPAS tutorial and the class documentation of the GUI library are
+    built here (target 'doc') and installed into share/doc/html-gui; online at
+    https://archive.openms.de/openms/Documentation/<release/version|nightly/latest>/html-gui/.
+    The F1 help of TOPPView and TOPPAS opens it.

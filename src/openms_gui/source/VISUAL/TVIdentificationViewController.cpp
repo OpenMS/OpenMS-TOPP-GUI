@@ -32,8 +32,7 @@
 #include <OpenMS/VISUAL/SpectraIDViewTab.h>
 #include <OpenMS/VISUAL/MISC/Qt5Port.h>
 
-#include <boost/range/adaptor/reversed.hpp>
-#include <boost/make_shared.hpp>
+#include <ranges>
 
 #include <QtWidgets/QMessageBox>
 #include <QtCore/QString>
@@ -748,7 +747,7 @@ namespace OpenMS
     }
     Size row_index = 1;
     // ion annotations above sequence - reverse order to have first ion closest to sequence:
-    for (const std::string& ion : boost::adaptors::reverse(top_ions))
+    for (const std::string& ion : std::views::reverse(top_ions))
     {
       table[row_index][0] = "<small>" + ion + "</small>";
       for (Size pos : ion_pos[ion])
@@ -784,7 +783,7 @@ namespace OpenMS
     generateSequenceRow_(seq, table[row_index]);
     // ion annotations below sequence - iterate over the bottom ions in reverse order (bottom-most first):
     row_index = table.size() - 2;
-    for (const std::string& ion : boost::adaptors::reverse(bottom_ions))
+    for (const std::string& ion : std::views::reverse(bottom_ions))
     {
       table[row_index][n_cols - 1] = "<small>" + ion + "<small>";
       for (Size pos : ion_pos[ion])

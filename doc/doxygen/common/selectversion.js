@@ -1,12 +1,16 @@
 if (window.location.hostname.includes("abibuilder")) {
   urlrootdir = "/archive/openms/Documentation"
+} else if (window.location.hostname.includes("archive.openms.de")) {
+  urlrootdir = "/openms/Documentation"
 } else {
   urlrootdir = "/doxygen"
 }
 
 let patharr = window.location.pathname.replace(/\/+/g, '/').split('/');
 
-let htmlidx = patharr.indexOf("html")
+// the documentation of the GUI layer is in html-gui/, next to html/ of OpenMS
+let htmldir = patharr.includes("html-gui") ? "html-gui" : "html";
+let htmlidx = patharr.indexOf(htmldir)
 let thisvers = patharr[htmlidx - 1];
 
 $('.dropbtn').html(thisvers);
@@ -66,7 +70,7 @@ function parseDirectoryListing(stringOfHtml) {
 
     docs = docs.map((x) => '<a class="verslink" href="'
         + urlrootdir
-        + '/release/' + x + '/html/' + patharr[patharr.length - 1] + '">'
+        + '/release/' + x + '/' + htmldir + '/' + patharr[patharr.length - 1] + '">'
         + x
         + '</a>');
         
@@ -76,7 +80,7 @@ function parseDirectoryListing(stringOfHtml) {
     // TODO Style nightly differently to make sure users see it?
     docs.unshift('<a class="verslink" href="'
         + urlrootdir
-        + '/nightly/' + 'html/' + patharr[patharr.length - 1] + '">'
+        + '/nightly/latest/' + htmldir + '/' + patharr[patharr.length - 1] + '">'
         + 'nightly'
         + '</a>');
         

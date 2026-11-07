@@ -1,8 +1,10 @@
 Help us to make OpenMS better and become part of the OpenMS open-source community.
 
+This repository holds the graphical tools of OpenMS (TOPPView, TOPPAS, INIFileEditor, ExecutePipeline, ImageCreator) and the OpenMS_GUI library. The OpenMS library and the TOPP command line tools are developed in [OpenMS/OpenMS](https://github.com/OpenMS/OpenMS); a change that needs both repositories needs a pull request in each, the one in OpenMS first.
+
 This document is displayed because you either opened an issue or you want to provide your code as a pull request for inclusion into OpenMS. Please take a look at the appropriate section below to find some details on how we handle this process.
 When interacting with other developers, users or anyone else from our community, please adhere to
-[our CODE OF CONDUCT](https://github.com/OpenMS/OpenMS/blob/develop/CODE_OF_CONDUCT.md)
+[our CODE OF CONDUCT](CODE_OF_CONDUCT.md)
 
 > **New to open source or the project?** Start with our [Contributor Onboarding Guide](https://openms.de/contribute/) for a beginner-friendly introduction.
 
@@ -14,10 +16,10 @@ You most likely came here to:
   - point out missing documentation
   - request new features
 
-To do so, open a [new issue](https://github.com/OpenMS/OpenMS/issues/new/choose) describing the bug, your question, etc.
+To do so, open a [new issue](https://github.com/OpenMS/OpenMS-TOPP-GUI/issues/new/choose) describing the bug, your question, etc.
 
 If you found a bug, e.g. an OpenMS tool crashes during data processing, it is essential to provide some basic information:
-  - the OpenMS version you are running
+  - the OpenMS version you are running (and of the GUI tools, if they differ)
   - the platform you are running OpenMS on (Windows 10, ...)
   - how you installed OpenMS (e.g., conda, binary installers, self compiled)
   - a description on how to reproduce the bug
@@ -34,9 +36,8 @@ https://openms.readthedocs.io/en/latest/manual/develop.html
 
 Before you open the pull request, make sure you
  - adhere to [our coding conventions](https://openms.readthedocs.io/en/latest/manual/develop.html#coding-conventions)
- - have [unit tests and functional tests](https://openms.readthedocs.io/en/latest/manual/develop.html#automated-unit-tests) - see also [this example](https://github.com/OpenMS/OpenMS/blob/develop/src/tests/class_tests/openms/source/MSNumpressCoder_test.cpp)
- - have [proper documentation](https://openms.readthedocs.io/en/latest/manual/develop/developer-faq.html#doxygen-documentation) - see also [this example](https://github.com/OpenMS/OpenMS/blob/develop/src/openms/include/OpenMS/FORMAT/MSNumpressCoder.h)
- - have Python bindings — nanobind binding files are in `src/pyOpenMS/bindings/`; see `src/pyOpenMS/CLAUDE.md` for wrapping instructions
+ - have [unit tests and functional tests](https://openms.readthedocs.io/en/latest/manual/develop.html#automated-unit-tests) - GUI class tests use Qt TestLib, see `src/tests/class_tests/openms_gui/source/`
+ - have [proper documentation](https://openms.readthedocs.io/en/latest/manual/develop/developer-faq.html#doxygen-documentation) - check it with the `doc` target (see README.md)
 A core developer will review your changes to the main development branch (develop) and approve them (or ask for modifications). You may indicate the prefered reviewer(s) by adding links to them in a comment section (e.g., @cbielow @hendrikweisser @hroest @jpfeuffer @timosachsenberg)
 
 Also consider getting in contact with the core developers early. They might provide additional guidance and valuable information on how your specific aim is achieved. This might give you a head start in, for example, developing novel tools or algorithms.
