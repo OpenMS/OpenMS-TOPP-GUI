@@ -52,36 +52,6 @@ function(convert_to_unity_build UB_SUFFIX SOURCE_FILES_NAME)
 endfunction(convert_to_unity_build)
 
 #------------------------------------------------------------------------------
-## Copy the dll produced by the given target to the test/doc binary path.
-## @param targetname The target to modify.
-## @note This macro will do nothing outside of Windows since the linker will find the libs.
-macro(copy_dll_to_extern_bin targetname)
-  if (WIN32)
-    get_property(_copy_dll_is_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
-    if(_copy_dll_is_multi_config)
-      file(TO_NATIVE_PATH "${OPENMS_HOST_BINARY_DIRECTORY}/src/tests/class_tests/bin/$<CONFIG>/$<TARGET_FILE_NAME:${targetname}>" DLL_TEST_TARGET)
-      file(TO_NATIVE_PATH "${OPENMS_HOST_BINARY_DIRECTORY}/src/tests/class_tests/bin/$<CONFIG>" DLL_TEST_TARGET_PATH)
-
-      file(TO_NATIVE_PATH "${OPENMS_HOST_BINARY_DIRECTORY}/doc/doxygen/parameters/$<CONFIG>/$<TARGET_FILE_NAME:${targetname}>" DLL_DOC_TARGET)
-      file(TO_NATIVE_PATH "${OPENMS_HOST_BINARY_DIRECTORY}/doc/doxygen/parameters/$<CONFIG>" DLL_DOC_TARGET_PATH)
-    else()
-      file(TO_NATIVE_PATH "${OPENMS_HOST_BINARY_DIRECTORY}/src/tests/class_tests/bin/$<TARGET_FILE_NAME:${targetname}>" DLL_TEST_TARGET)
-      file(TO_NATIVE_PATH "${OPENMS_HOST_BINARY_DIRECTORY}/src/tests/class_tests/bin/" DLL_TEST_TARGET_PATH)
-
-      file(TO_NATIVE_PATH "${OPENMS_HOST_BINARY_DIRECTORY}/doc/doxygen/parameters/$<TARGET_FILE_NAME:${targetname}>" DLL_DOC_TARGET)
-      file(TO_NATIVE_PATH "${OPENMS_HOST_BINARY_DIRECTORY}/doc/doxygen/parameters/" DLL_DOC_TARGET_PATH)
-    endif()
-    add_custom_command(TARGET ${targetname}
-            POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${DLL_TEST_TARGET_PATH}"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${targetname}> ${DLL_TEST_TARGET}
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${DLL_DOC_TARGET_PATH}"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${targetname}> ${DLL_DOC_TARGET}
-            )
-  endif()
-endmacro()
-
-#------------------------------------------------------------------------------
 # openms_add_library()
 # Create an OpenMS library, install it, register for export of targets, and
 # export all required variables for later usage in the build system.
@@ -103,14 +73,17 @@ endmacro()
 #                                             (see openms_validate_public_headers())>
 #                    DLL_EXPORT_PATH <path to the dll export header>
 #                    EXPORT_SET <export set of the library (see cmake/install_macros.cmake);
-#                                the core set OpenMSTargets, install component 'library',
-#                                when omitted>)
+#                                OpenMSGUITargets when omitted>)
 #
 # Besides TARGET_NAME the library is available as OpenMS::TARGET_NAME, the name
 # under which it is exported (install(EXPORT ... NAMESPACE OpenMS::)), so
 # in-tree code and consumers of the installed package can link the same name.
 # The library and its export go into the install components of EXPORT_SET; the
 # headers always go into the component TARGET_NAME_headers.
+#
+# On Windows the DLLs the library needs at run time (the OpenMS core, Qt) are copied
+# next to it into bin/, where all executables of this build (applications, tests,
+# documenters) are, so they run from the build tree without changing PATH.
 function(openms_add_library)
   #------------------------------------------------------------------------------
   # parse arguments to function
@@ -229,7 +202,7 @@ function(openms_add_library)
   #------------------------------------------------------------------------------
   # we also want to install the library (into the components of its export set)
   if(NOT openms_add_library_EXPORT_SET)
-    set(openms_add_library_EXPORT_SET ${OPENMS_EXPORT_SET})
+    set(openms_add_library_EXPORT_SET ${OPENMS_GUI_EXPORT_SET})
   endif()
   install_library(${openms_add_library_TARGET_NAME} HEADERS EXPORT_SET ${openms_add_library_EXPORT_SET})
 
@@ -238,78 +211,17 @@ function(openms_add_library)
   openms_register_export_target(${openms_add_library_TARGET_NAME} ${openms_add_library_EXPORT_SET})
 
   #------------------------------------------------------------------------------
-  # On Windows copy DLLs and dependencies of them to other locations of executables that need them (tests, documenter)
-  # TODO Find something that does not copy 100s of MB three times.
-  # TODO I think this should ideally go to the tests and docs CMakeLists separately.
-  # Copy target DLLs themselves
-  copy_dll_to_extern_bin(${openms_add_library_TARGET_NAME})
-  # Copy dependencies
+  # On Windows copy the DLLs the library depends on (OpenMS core, Qt) next to it
   if(WIN32)
-    # with newer CMakes we can also easily copy dependencies like Qt
-    # This stores the command as a list
-    set(has_dll_dep
-            $<BOOL:$<TARGET_RUNTIME_DLLS:${openms_add_library_TARGET_NAME}>>
+    ## never empty: the library always links the OpenMS core and Qt DLLs
+    add_custom_command(TARGET ${openms_add_library_TARGET_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_RUNTIME_DLLS:${openms_add_library_TARGET_NAME}>
+                    $<TARGET_FILE_DIR:${openms_add_library_TARGET_NAME}>
+            COMMAND_EXPAND_LISTS
             )
-    set(none_command
-            ${CMAKE_COMMAND} -E echo
-            )
-    ## TODO check if we can use create_symlink instead
-    set(copy_dlls_to_output_folder
-            ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_RUNTIME_DLLS:${openms_add_library_TARGET_NAME}>
-            $<TARGET_FILE_DIR:${openms_add_library_TARGET_NAME}>
-            )
-
-    get_property(is_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
-    if(is_multi_config)
-      file(TO_NATIVE_PATH "${OPENMS_HOST_BINARY_DIRECTORY}/src/tests/class_tests/bin/$<CONFIG>/" DLL_TEST_TARGET_PATH)
-      file(TO_NATIVE_PATH "${OPENMS_HOST_BINARY_DIRECTORY}/doc/doxygen/parameters/$<CONFIG>/" DLL_DOC_TARGET_PATH)
-    else()
-      file(TO_NATIVE_PATH "${OPENMS_HOST_BINARY_DIRECTORY}/src/tests/class_tests/bin/" DLL_TEST_TARGET_PATH)
-      file(TO_NATIVE_PATH "${OPENMS_HOST_BINARY_DIRECTORY}/doc/doxygen/parameters/" DLL_DOC_TARGET_PATH)
-    endif()
-
-    set(copy_dlls_to_test_folder
-            ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_RUNTIME_DLLS:${openms_add_library_TARGET_NAME}>
-            ${DLL_TEST_TARGET_PATH}
-            )
-
-    foreach(command IN ITEMS "${copy_dlls_to_output_folder}" "${copy_dlls_to_test_folder}")
-      set(if_runtime_dlls_copy
-              $<IF:${has_dll_dep},${command},${none_command}>
-              )
-      add_custom_command(TARGET ${openms_add_library_TARGET_NAME} POST_BUILD
-              COMMAND "${if_runtime_dlls_copy}"
-              COMMAND_EXPAND_LISTS
-              )
-    endforeach()
-
-    if(ENABLE_DOCS)
-        set(copy_dlls_to_doc_folder
-         ${CMAKE_COMMAND} -E copy_if_different
-         $<TARGET_RUNTIME_DLLS:${openms_add_library_TARGET_NAME}>
-         ${DLL_DOC_TARGET_PATH}
-         )
-        set(if_runtime_dlls_copy
-              $<IF:${has_dll_dep},${copy_dlls_to_doc_folder},${none_command}>
-              )
-        add_custom_command(TARGET ${openms_add_library_TARGET_NAME} POST_BUILD
-              COMMAND ${CMAKE_COMMAND} -E make_directory "${DLL_DOC_TARGET_PATH}"
-              COMMAND "${if_runtime_dlls_copy}"
-              COMMAND_EXPAND_LISTS
-              )
-    endif()
-
-    ## another fix for APPLE, see https://github.com/OpenMS/OpenMS/pull/7525
-    if(APPLECLANG)
-      if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "15.0.0")
-          target_link_options(${openms_add_library_TARGET_NAME} PRIVATE -ld_classic)
-          set_target_properties(${openms_add_library_TARGET_NAME} PROPERTIES
-              QT_NO_DISABLE_WARN_DUPLICATE_LIBRARIES TRUE)
-      endif()
-    endif()
   endif()
+
   #------------------------------------------------------------------------------
   # Status message for configure output
   message(STATUS "Adding library ${openms_add_library_TARGET_NAME} - SUCCESS")

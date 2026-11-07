@@ -10,34 +10,23 @@
 # throughout the OpenMS build system
 
 #------------------------------------------------------------------------------
-# The installed package is layered. Each layer is one export set (the file
-# OpenMSConfig.cmake includes) and one pair of install components, so an
-# installation may stop at any layer and the package of what is installed stays
-# consistent (CMake refuses an export whose library files are missing):
+# The installed OpenMS package is layered: the core (export set OpenMSTargets,
+# components library/cmake), the CLI layer (OpenMSCLITargets, library_cli/cmake_cli),
+# both installed by OpenMS, and the GUI layer built here:
 #
 #   layer  export set       libraries      cmake files   targets
-#   core   OpenMSTargets    library        cmake         OpenMS::OpenMS, OpenMS::OpenSwathAlgo
-#                                                        and the bundled third-party libraries
-#   CLI    OpenMSCLITargets library_cli    cmake_cli     OpenMS::OpenMS_CLI (links the core layer)
 #   GUI    OpenMSGUITargets library_gui    cmake_gui     OpenMS::OpenMS_GUI (links the CLI layer)
 #
-# Headers keep their own components (OpenMS_headers, OpenMS_CLI_headers,
-# OpenMS_GUI_headers, OpenSwathAlgo_headers, thirdparty_headers). A core-only
-# installation (e.g. the one the pyOpenMS wheels are built against) is
-# library + the core header components + share + cmake.
-set(OPENMS_EXPORT_SET "OpenMSTargets")
-set(OPENMS_CLI_EXPORT_SET "OpenMSCLITargets")
+# The headers are in OpenMS_GUI_headers. The package of the GUI layer is OpenMSGUI
+# (OpenMSGUIConfig.cmake, see cmake/export_macros.cmake).
 set(OPENMS_GUI_EXPORT_SET "OpenMSGUITargets")
-set(OPENMS_EXPORT_SETS ${OPENMS_EXPORT_SET} ${OPENMS_CLI_EXPORT_SET} ${OPENMS_GUI_EXPORT_SET})
-
-# the install components of each export set: <set>_LIBRARY_COMPONENT holds the
-# libraries, <set>_CMAKE_COMPONENT the exported target files
-set(${OPENMS_EXPORT_SET}_LIBRARY_COMPONENT library)
-set(${OPENMS_EXPORT_SET}_CMAKE_COMPONENT cmake)
-set(${OPENMS_CLI_EXPORT_SET}_LIBRARY_COMPONENT library_cli)
-set(${OPENMS_CLI_EXPORT_SET}_CMAKE_COMPONENT cmake_cli)
+set(OPENMS_EXPORT_SETS ${OPENMS_GUI_EXPORT_SET})
 set(${OPENMS_GUI_EXPORT_SET}_LIBRARY_COMPONENT library_gui)
 set(${OPENMS_GUI_EXPORT_SET}_CMAKE_COMPONENT cmake_gui)
+
+## The runtime dependency set of everything installed here. Packages install it
+## (cmake/package_general.cmake) without what the OpenMS core ships itself.
+set(OPENMS_GUI_DEPS OPENMS_GUI_DEPS)
 
 #------------------------------------------------------------------------------
 # Installs the library lib_target_name into the library component of its export
@@ -46,8 +35,7 @@ set(${OPENMS_GUI_EXPORT_SET}_CMAKE_COMPONENT cmake_gui)
 # install_library(<target> [HEADERS] [EXPORT_SET <set>])
 #
 # @param lib_target_name The target name of the library that should be installed
-# @param EXPORT_SET      One of ${OPENMS_EXPORT_SETS}; the core set OpenMSTargets
-#                        (component 'library') when omitted
+# @param EXPORT_SET      One of ${OPENMS_EXPORT_SETS}; OpenMSGUITargets when omitted
 # @param HEADERS         Install the public HEADERS file set in <target>_headers
 function(install_library lib_target_name)
     cmake_parse_arguments(_install_library "HEADERS" "EXPORT_SET" "" ${ARGN})
@@ -55,7 +43,7 @@ function(install_library lib_target_name)
       message(FATAL_ERROR "install_library(${lib_target_name}): unexpected arguments ${_install_library_UNPARSED_ARGUMENTS}")
     endif()
     if(NOT _install_library_EXPORT_SET)
-      set(_install_library_EXPORT_SET ${OPENMS_EXPORT_SET})
+      set(_install_library_EXPORT_SET ${OPENMS_GUI_EXPORT_SET})
     endif()
     if(NOT _install_library_EXPORT_SET IN_LIST OPENMS_EXPORT_SETS)
       message(FATAL_ERROR "install_library(${lib_target_name}): unknown export set '${_install_library_EXPORT_SET}' (known: ${OPENMS_EXPORT_SETS})")
@@ -67,7 +55,7 @@ function(install_library lib_target_name)
         COMPONENT ${lib_target_name}_headers)
     endif()
     install(TARGETS ${lib_target_name}
-      RUNTIME_DEPENDENCY_SET OPENMS_DEPS
+      RUNTIME_DEPENDENCY_SET ${OPENMS_GUI_DEPS}
       EXPORT ${_install_library_EXPORT_SET}
       LIBRARY DESTINATION ${INSTALL_LIB_DIR} COMPONENT ${_component}
       ARCHIVE DESTINATION ${INSTALL_LIB_DIR} COMPONENT ${_component}
@@ -75,8 +63,7 @@ function(install_library lib_target_name)
       ${_header_install_args}
       )
     # MSVC writes the debug information of a DLL to a .pdb file next to it (in a Debug
-    # or RelWithDebInfo build; a Release build has none, hence OPTIONAL). It ships with
-    # the DLL, so a consumer of the Windows Debug SDK can step into OpenMS code.
+    # or RelWithDebInfo build; a Release build has none, hence OPTIONAL).
     # TARGET_PDB_FILE is only defined for shared libraries and executables.
     get_target_property(_type ${lib_target_name} TYPE)
     if(MSVC AND _type STREQUAL "SHARED_LIBRARY")
@@ -93,8 +80,7 @@ set(OPENMS_PUBLIC_INCLUDE_ALLOWLIST
   "OpenMS/.*"                             # OpenMS' own headers
   "[a-z_]+"                               # the C++ standard library: <vector>, <string_view>, ...
   "sys/.*" "windows\\.h" "winternl\\.h"   # operating-system headers
-  "omp\\.h"                               # OpenMP, a PUBLIC dependency of libOpenMS
-  "CrawdadWrapper\\.h")                   # Crawdad, a PUBLIC dependency of WITH_CRAWDAD builds
+  "omp\\.h")                              # OpenMP, a PUBLIC dependency of libOpenMS
 
 #------------------------------------------------------------------------------
 # Reject every include of an installed header that is not on the allowlist above.
@@ -131,9 +117,9 @@ function(openms_validate_public_headers)
       if (_rejected)
         list(JOIN _rejected ", " _rejected)
         message(FATAL_ERROR "Installed header ${_header} includes ${_rejected}, which downstream "
-                            "builds cannot rely on. For a PRIVATE dependency, add the header to "
-                            "OpenMS_private_headers or expose OpenMS types instead. For a PUBLIC one, "
-                            "which OpenMSConfig.cmake finds for consumers, allow its headers with "
+                            "builds cannot rely on. For a PRIVATE dependency, keep the include in the .cpp file "
+                            "or expose OpenMS types instead. For a PUBLIC one, which OpenMSGUIConfig.cmake "
+                            "finds for consumers, allow its headers with "
                             "openms_add_library(... ALLOWED_PUBLIC_INCLUDES <regex>).")
       endif()
     endif()
@@ -146,18 +132,17 @@ endfunction()
 # install_tool(<target> [COMPONENT <component>])
 #
 # @param tool_target_name The target name of the tool that should be installed
-# @param COMPONENT        The install component; 'Applications' (the TOPP tools) when
-#                         omitted. The GUI applications use
-#                         ${OPENMS_GUI_APPLICATIONS_COMPONENT} (see the top-level CMakeLists.txt).
+# @param COMPONENT        The install component; ${OPENMS_GUI_APPLICATIONS_COMPONENT}
+#                         (see the top-level CMakeLists.txt) when omitted.
 function(install_tool tool_target_name)
     cmake_parse_arguments(_install_tool "" "COMPONENT" "" ${ARGN})
     if(_install_tool_UNPARSED_ARGUMENTS)
       message(FATAL_ERROR "install_tool(${tool_target_name}): unexpected arguments ${_install_tool_UNPARSED_ARGUMENTS}")
     endif()
     if(NOT _install_tool_COMPONENT)
-      set(_install_tool_COMPONENT Applications)
+      set(_install_tool_COMPONENT ${OPENMS_GUI_APPLICATIONS_COMPONENT})
     endif()
-    install(TARGETS ${tool_target_name} RUNTIME_DEPENDENCY_SET OPENMS_DEPS
+    install(TARGETS ${tool_target_name} RUNTIME_DEPENDENCY_SET ${OPENMS_GUI_DEPS}
       RUNTIME DESTINATION ${INSTALL_BIN_DIR} COMPONENT ${_install_tool_COMPONENT}
       BUNDLE DESTINATION ${INSTALL_BIN_DIR} COMPONENT ${_install_tool_COMPONENT}
       )
@@ -204,14 +189,10 @@ macro(install_code code_snippet component)
 endmacro()
 
 #------------------------------------------------------------------------------
-# Installs the exported target information of every export set that has
-# targets: one <set>.cmake file per layer in the cmake component of that layer
-# (cmake, cmake_cli, cmake_gui), so an installation without a layer has no file
-# claiming its libraries. Consumers see every target as OpenMS::<target>
-# (OpenMS::OpenMS, OpenMS::OpenSwathAlgo, OpenMS::OpenMS_CLI, ...); a target of
-# one layer refers to the targets of the layer below by these names, and
-# OpenMSConfig.cmake includes the files in layer order and adds un-namespaced
-# aliases for the OpenMS libraries.
+# Installs the exported targets of the GUI layer, OpenMSGUITargets.cmake, in
+# component cmake_gui. Consumers see the library as OpenMS::OpenMS_GUI; it refers
+# to the core and CLI layers as OpenMS::OpenMS and OpenMS::OpenMS_CLI, which
+# OpenMSGUIConfig.cmake finds first.
 macro(install_export_targets )
     foreach(_export_set IN LISTS OPENMS_EXPORT_SETS)
       if(_OPENMS_EXPORT_TARGETS_${_export_set})
@@ -221,134 +202,6 @@ macro(install_export_targets )
                 COMPONENT ${${_export_set}_CMAKE_COMPONENT})
       endif()
     endforeach()
-endmacro()
-
-#------------------------------------------------------------------------------
-# Returns in ${out_var} the .NET runtime identifiers (RIDs) whose native assets
-# this build can load, spelled as NuGet spells them, <os>-<arch>:
-# https://learn.microsoft.com/dotnet/core/rid-catalog
-function(openms_target_dotnet_rids out_var)
-  if(WIN32)
-    set(_os "win")
-  elseif(APPLE)
-    set(_os "osx")
-  else()
-    set(_os "linux")
-  endif()
-
-  ## CMAKE_SYSTEM_PROCESSOR spells the same architecture differently per
-  ## platform (x86_64 vs AMD64, aarch64 vs arm64). On macOS
-  ## CMAKE_OSX_ARCHITECTURES overrides it and may name more than one.
-  set(_processors "${CMAKE_SYSTEM_PROCESSOR}")
-  if(APPLE AND CMAKE_OSX_ARCHITECTURES)
-    set(_processors ${CMAKE_OSX_ARCHITECTURES})
-  endif()
-
-  set(_rids)
-  foreach(_processor IN LISTS _processors)
-    string(TOLOWER "${_processor}" _processor)
-    if(_processor MATCHES "^(x86_64|amd64|x64)$")
-      set(_arch "x64")
-    elseif(_processor MATCHES "^(aarch64|arm64)$")
-      set(_arch "arm64")
-    elseif(_processor MATCHES "^(i[3-6]86|x86)$")
-      set(_arch "x86")
-    elseif(_processor MATCHES "^arm")
-      set(_arch "arm")
-    else()
-      ## Unknown architecture: pass it through rather than guess. A RID nothing
-      ## matches only means nothing is kept, which install_thirdparty_folder
-      ## reports below.
-      set(_arch "${_processor}")
-    endif()
-    list(APPEND _rids "${_os}-${_arch}")
-  endforeach()
-
-  ## An arm64 Mac runs x86_64 processes under Rosetta, so an x86_64 mono on one
-  ## still asks for the osx-x64 helper. Mach-O files never reach dpkg-shlibdeps,
-  ## so keeping it costs nothing where the exclusion below actually matters.
-  if(APPLE AND "osx-arm64" IN_LIST _rids)
-    list(APPEND _rids "osx-x64")
-  endif()
-
-  list(REMOVE_DUPLICATES _rids)
-  set(${out_var} "${_rids}" PARENT_SCOPE)
-endfunction()
-
-#------------------------------------------------------------------------------
-# Installs Thirdparty folders with executables
-macro(install_thirdparty_folder foldername)
-  if(EXISTS ${SEARCH_ENGINES_DIRECTORY}/${foldername})
-    ## The .NET tools here (ThermoRawFileParser) carry NuGet's 'runtimes/<rid>/'
-    ## layout: one folder of native helper libraries per runtime identifier the
-    ## NuGet package supports. Mono.Unix ships nine of them -- android-arm,
-    ## android-arm64, android-x64, android-x86, linux-arm, linux-arm64,
-    ## linux-x64, osx-arm64 and osx-x64 -- and at most the one matching the
-    ## machine can ever be loaded. ThermoRawFileParser's own Mono.Unix.dll.config
-    ## maps the library to runtimes/linux-x64, runtimes/osx-x64 and
-    ## runtimes/osx-arm64, and to nothing else.
-    ##
-    ## The selection below goes by the target architecture, not by that file, so a
-    ## linux-arm64 build keeps runtimes/linux-arm64 although the config does not
-    ## map it: the helper is native to that host, which is all dpkg-shlibdeps
-    ## needs, and a later ThermoRawFileParser whose config maps it will find it.
-    ##
-    ## Seven of the nine carry a .so, so CPackDeb hands all seven to
-    ## dpkg-shlibdeps and five are foreign on any given host; the two osx ones
-    ## are Mach-O and never reach it.
-    ##
-    ## The rest is not merely dead weight. Any foreign-architecture ELF in the
-    ## staging tree makes dpkg-shlibdeps fail with "cannot find library
-    ## libc.so.6 needed by ... (ELF format: ...)", an error --ignore-missing-info
-    ## does not cover, so CPack aborts before writing the .deb. That is what
-    ## forced CPACK_DEBIAN_PACKAGE_SHLIBDEPS off once already (on in #10202,
-    ## reverted in #10207). Install the RIDs this build targets and leave the
-    ## others behind; cmake/package_deb.cmake depends on that.
-    openms_target_dotnet_rids(_target_rids)
-    set(_foreign_rid_excludes)
-    set(_present_rids)
-    set(_kept_rids)
-    set(_runtimes_dir "${SEARCH_ENGINES_DIRECTORY}/${foldername}/runtimes")
-    file(GLOB _rid_entries RELATIVE "${_runtimes_dir}" "${_runtimes_dir}/*")
-    foreach(_rid IN LISTS _rid_entries)
-      if(NOT IS_DIRECTORY "${_runtimes_dir}/${_rid}")
-        continue()
-      endif()
-      list(APPEND _present_rids "${_rid}")
-      if("${_rid}" IN_LIST _target_rids)
-        list(APPEND _kept_rids "${_rid}")
-      else()
-        ## Matches the RID directory itself, so install() never descends into
-        ## it. The (/|$) tail is what keeps 'android-arm' from also matching
-        ## 'android-arm64'.
-        list(APPEND _foreign_rid_excludes REGEX "/runtimes/${_rid}(/|$)" EXCLUDE)
-      endif()
-    endforeach()
-    if(_present_rids AND NOT _kept_rids)
-      ## Nothing here this build could load, so drop the tree instead of leaving
-      ## an empty runtimes/ behind. Windows is that case: Mono.Unix is a Unix
-      ## helper and the vendored tool carries no win-* runtime at all.
-      set(_foreign_rid_excludes REGEX "/runtimes(/|$)" EXCLUDE)
-    endif()
-    if(_foreign_rid_excludes)
-      message(STATUS "${foldername}: installing .NET runtimes ${_kept_rids} of ${_present_rids}")
-    endif()
-
-    install(DIRECTORY             ${SEARCH_ENGINES_DIRECTORY}/${foldername}
-            DESTINATION           ${INSTALL_SHARE_DIR}/THIRDPARTY
-            COMPONENT             ${foldername}
-            FILE_PERMISSIONS      OWNER_EXECUTE OWNER_WRITE OWNER_READ
-                                  GROUP_READ GROUP_EXECUTE
-                                  WORLD_READ WORLD_EXECUTE
-            DIRECTORY_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ
-                                  GROUP_READ GROUP_EXECUTE
-                                  WORLD_READ WORLD_EXECUTE
-            ${_foreign_rid_excludes}
-            REGEX "^\\..*" EXCLUDE ## Exclude hidden files (svn, git, DSStore)
-            REGEX ".*\\/\\..*" EXCLUDE ## Exclude hidden files in subdirectories
-            )
-    list(APPEND THIRDPARTY_COMPONENT_GROUP ${foldername})
-  endif()
 endmacro()
 
 #------------------------------------------------------------------------------

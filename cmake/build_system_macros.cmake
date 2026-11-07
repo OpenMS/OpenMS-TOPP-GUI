@@ -7,10 +7,6 @@
 # --------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------
-## export a single option indicating if Arrow/Parquet static libs should be preferred
-option(ARROW_USE_STATIC "Use Arrow/Parquet static libraries." ON)
-
-#------------------------------------------------------------------------------
 ## Wraps the common find boost code into a single call
 ## @param .. simply add all required components to the call
 ## @note This macro will define BOOST_MOC_ARGS that should be added to all moc
@@ -48,4 +44,10 @@ macro(is_valid_package package_type)
   	endforeach()
   	message(FATAL_ERROR "Aborting ...")
   endif()
+endmacro()
+
+#------------------------------------------------------------------------------
+## The OpenMS core links its TOPP tools with mimalloc on Windows (WITH_MIMALLOC). The GUI
+## TOPP tools do not need it; the macro is kept so the moved code works unchanged.
+macro(openms_link_mimalloc target)
 endmacro()

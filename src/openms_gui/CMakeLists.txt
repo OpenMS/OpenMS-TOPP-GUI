@@ -24,7 +24,8 @@ include (${PROJECT_SOURCE_DIR}/includes.cmake)
 #------------------------------------------------------------------------------
 # add the library: the GUI layer of the installed package (export set
 # OpenMSGUITargets, install components library_gui and cmake_gui, headers in
-# OpenMS_GUI_headers); it links the CLI layer, which links the core layer.
+# OpenMS_GUI_headers); it links the CLI layer of the installed OpenMS core,
+# which links the core layer.
 openms_add_library(TARGET_NAME OpenMS_GUI
                    SOURCE_FILES ${OpenMSVisual_sources}
                    HEADER_FILES ${OpenMSVisual_sources_h}
@@ -95,35 +96,24 @@ foreach(i ${GUI_executables})
   target_link_libraries(${i} OpenMS_GUI)
 endforeach(i)
 
-# GUI TOPP tools also need direct OpenMS link for TOPPBase etc.
-## these two are TOPP tools (TOPPBase-derived) with a Qt front end
-foreach(i ExecutePipeline ImageCreator)
-  target_link_libraries(${i} OpenMS_CLI)
-endforeach()
-
-# The TOPP tools that need the GUI library, declared the same way as the tools of
-# src/topp/executables.cmake so they reach the tool registry and the CWL/INI generation
-# exactly in a WITH_GUI build. One list drives both the declarations and the dependency
-# below, so a tool cannot be built here without being registered. These are a subset of
-# GUI_executables, which also holds the GUI applications that are not TOPP tools
-# (TOPPView, TOPPAS, INIFileEditor).
+# The TOPP tools that need the GUI library (TOPPBase-derived tools with a Qt front end).
+# They are declared like the TOPP tools of the OpenMS core, so they reach the tool registry
+# of the GUI layer (OpenMS-GUI.tsv, see src/CMakeLists.txt). One list drives both the
+# declarations and the link below, so a tool cannot be built here without being registered.
+# These are a subset of GUI_executables, which also holds the GUI applications that are not
+# TOPP tools (TOPPView, TOPPAS, INIFileEditor).
 set(GUI_TOPP_TOOLS ExecutePipeline ImageCreator)
 foreach(_gui_topp_tool ${GUI_TOPP_TOOLS})
+  target_link_libraries(${_gui_topp_tool} OpenMS::OpenMS_CLI)
   openms_topp_tool(${_gui_topp_tool} "Misc")
-  openms_link_mimalloc(${_gui_topp_tool}) # WITH_MIMALLOC on Windows x64, otherwise a no-op
 endforeach()
-
-# Make the TOPP collection target depend on GUI TOPP tools
-if(TARGET TOPP)
-  add_dependencies(TOPP ${GUI_TOPP_TOOLS})
-endif()
 
   ## install platform plugins, and a qt.conf in bin/ that points to them: ExecutePipeline creates
   ## a QApplication, so it needs the platform plugin even without a window.
   if(WIN32)
       install(IMPORTED_RUNTIME_ARTIFACTS "Qt6::QWindowsIntegrationPlugin"
               DESTINATION "${INSTALL_PLUGIN_DIR}/platforms"
-              RUNTIME_DEPENDENCY_SET OPENMS_DEPS
+              RUNTIME_DEPENDENCY_SET ${OPENMS_GUI_DEPS}
               COMPONENT Dependencies)
       file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/qt.conf"
         "[Paths]\nPlugins = ${QT_PLUGIN_PATH_REL_TO_BIN}\n")

@@ -10,18 +10,16 @@
 #
 # openms_topp_tool(<Name> <Category>) is the single place a TOPP tool is declared. It says
 # both that the tool exists (so the build produces it) and which category TOPPAS groups it
-# under (so ToolHandler can list it). The registry share/OpenMS/TOOLS/OpenMS.tsv (one file per
-# layer in a build against an installed library, see src/CMakeLists.txt) is written
-# from these declarations by openms_write_tool_registry(), which is why there is no
-# hand-maintained list to keep in step with the build: a tool that a build option does not
-# build is not declared, so it is not registered either, and a tool cannot be built without
-# being registered or registered without being built.
+# under (so ToolHandler can list it). The registry of the GUI layer,
+# share/OpenMS/TOOLS/OpenMS-GUI.tsv, is written from these declarations by
+# openms_write_tool_registry() (see src/CMakeLists.txt). ToolHandler reads every *.tsv in
+# that directory, so installed next to the core's OpenMS.tsv it adds the GUI TOPP tools.
 
 #------------------------------------------------------------------------------
 # Forget the tools of an earlier configure of this build directory.
 #
 # The declarations accumulate in cache variables so that they survive the directory scopes
-# they are made in (src/topp and, for the tools that need the GUI library, src/openms_gui).
+# they are made in (src/openms_gui).
 # Cache variables also survive a reconfigure, so without this every configure would append
 # the whole list again.
 function(openms_reset_topp_tools)
@@ -33,8 +31,8 @@ endfunction()
 # openms_topp_tool(<Name> <Category>)
 #
 # @param Name     the tool, built from <Name>.cpp or from the subdirectory <Name>/
-# @param Category the TOPPAS category, e.g. "Quantitation". Mirror the set of categories in
-#                 doc/doxygen/public/TOPP.doxygen.
+# @param Category the TOPPAS category, e.g. "Misc". Use one of the categories of the
+#                 OpenMS core (doc/doxygen/public/TOPP.doxygen of OpenMS).
 function(openms_topp_tool name category)
   if(ARGN)
     message(FATAL_ERROR "openms_topp_tool(${name}): unexpected arguments '${ARGN}'. Usage: openms_topp_tool(<Name> <Category>)")
@@ -71,10 +69,7 @@ endfunction()
 # Write the registry of every tool declared so far. Call it once, after every
 # add_subdirectory() that declares tools.
 #
-# TOOLS restricts the file to the given subset of the declared tools. A build against an
-# installed OpenMS library (OPENMS_USE_INSTALLED_LIBRARY) writes one registry per layer it
-# builds, so the TOPP tools and the GUI tools can be installed (and packaged) separately and
-# ToolHandler still finds all of them in one TOOLS directory.
+# TOOLS restricts the file to the given subset of the declared tools.
 #
 # Without any tool to list, no file is written and a file an earlier configure of this build
 # directory left behind is removed: a build of the libraries alone registers nothing.
@@ -122,11 +117,10 @@ function(openms_write_tool_registry out_file)
   set(_content
 "# GENERATED FILE, do not edit and do not commit.
 #
-# The TOPP tool registry: what ToolHandler lists, and the category TOPPAS groups each tool
-# under. Written by openms_write_tool_registry() (cmake/topp_tool_macros.cmake) from the
-# openms_topp_tool() declarations in src/topp/executables.cmake and, for the tools that need
-# the GUI library, src/openms_gui/CMakeLists.txt. To add a tool, declare it there; it is
-# built and registered by that one declaration.
+# The TOPP tool registry of the GUI layer (OpenMS-TOPP-GUI): what ToolHandler lists, and the
+# category TOPPAS groups each tool under. Written by openms_write_tool_registry()
+# (cmake/topp_tool_macros.cmake) from the openms_topp_tool() declarations in
+# src/openms_gui/CMakeLists.txt. The tools of the OpenMS core are in OpenMS.tsv next to it.
 #
 # A tool describes itself (parameters, formats, documentation) through its own binary, via
 # -write_ctd, so the registry carries nothing but the name and the category. Tools built
