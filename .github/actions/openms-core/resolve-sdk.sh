@@ -22,7 +22,8 @@
 #
 # Prints shell assignments (version, sdk_name, sdk_url, installer_name,
 # installer_url, version_fullstring), e.g. for >> "$GITHUB_OUTPUT".
-# OPENMS_ARCHIVE_URL overrides the base URL.
+# OPENMS_ARCHIVE_URL overrides the base URL. OPENMS_SDK_WAIT_MINUTES (default 0) waits for a
+# given version (not latest) whose folder is not complete yet.
 set -euo pipefail
 
 if [[ $# -lt 4 || $# -gt 5 ]]; then
@@ -111,7 +112,16 @@ if ! grep -qE "$folder_regex" <<<"$version"; then
   echo >&2 "ERROR: '$version' is not a version of the $channel channel"
   exit 2
 fi
-if ! find_in_folder "$version"; then
-  echo >&2 "ERROR: $base/$channel/$version has no SDK OpenMS-SDK-$version-$sdk_suffix and installer OpenMS-<version>-$installer_suffix"
-  exit 1
-fi
+# A given folder may still be uploading (the nightly of the GUI layer can start before
+# OpenMS's nightly is published): wait up to OPENMS_SDK_WAIT_MINUTES for it.
+wait_minutes=${OPENMS_SDK_WAIT_MINUTES:-0}
+waited=0
+until find_in_folder "$version"; do
+  if (( waited >= wait_minutes )); then
+    echo >&2 "ERROR: $base/$channel/$version has no SDK OpenMS-SDK-$version-$sdk_suffix and installer OpenMS-<version>-$installer_suffix"
+    exit 1
+  fi
+  echo >&2 "note: $base/$channel/$version is not complete for $os-$arch yet, waiting ($waited of $wait_minutes minutes)"
+  sleep 300
+  waited=$((waited + 5))
+done

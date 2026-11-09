@@ -52,6 +52,12 @@ inputs:
       release X.Y.Z
     required: false
     default: "latest"
+  wait:
+    description: >-
+      sdk: minutes to wait for the folder given by 'version' while it is not complete yet
+      (it is still being uploaded); not used for 'latest'
+    required: false
+    default: "0"
   sdk:
     description: >-
       sdk: 'false' installs only the OpenMS installer (prefix_path is then empty), for
@@ -391,6 +397,7 @@ runs:
         CHANNEL: ${{ inputs.channel }}
         VERSION: ${{ inputs.version }}
         NEED_SDK: ${{ inputs.sdk }}
+        OPENMS_SDK_WAIT_MINUTES: ${{ inputs.wait }}
       run: |
         bash "$GITHUB_ACTION_PATH/resolve-sdk.sh" "$CHANNEL" "$VERSION" "$RUNNER_OS" "$RUNNER_ARCH" "$NEED_SDK" |
           tee -a "$GITHUB_OUTPUT"
@@ -424,6 +431,7 @@ runs:
         CORE_DIR: ${{ steps.setup.outputs.core_dir }}
         DOWNLOAD_DIR: ${{ steps.setup.outputs.download_dir }}
         SDK_NAME: ${{ steps.sdk-resolve.outputs.sdk_name }}
+        FULLSTRING: ${{ steps.sdk-resolve.outputs.version_fullstring }}
       run: |
         set -euo pipefail
         rm -rf "$CORE_DIR"
@@ -438,6 +446,16 @@ runs:
         if [[ ! -d "$sdk_dir" ]]; then
           echo >&2 "ERROR: the SDK archive has no folder ${sdk_dir##*/}"
           ls "$CORE_DIR"
+          exit 1
+        fi
+        # The SDK and the installer must come from one build of OpenMS: the GUI layer is
+        # compiled against the SDK and run against the installer. A folder of the archive
+        # can hold both from different builds while a later run of the same day is
+        # uploading. The SDK's CMake package names its full version string.
+        sdk_fullstring=$(sed -n 's/^set(OpenMS_VERSION_FULLSTRING "\(.*\)")[[:space:]]*$/\1/p' \
+          "$sdk_dir/lib/cmake/OpenMS/OpenMSConfig.cmake" "$sdk_dir/CMake/OpenMSConfig.cmake" 2>/dev/null | head -n 1 || true)
+        if [[ -n "$sdk_fullstring" && "$sdk_fullstring" != "$FULLSTRING" ]]; then
+          echo >&2 "ERROR: the SDK is OpenMS $sdk_fullstring, the installer OpenMS $FULLSTRING: they come from different builds (an upload in progress?)"
           exit 1
         fi
         echo "sdk_dir=$sdk_dir" >>"$GITHUB_OUTPUT"
