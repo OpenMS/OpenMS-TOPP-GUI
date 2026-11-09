@@ -136,11 +136,14 @@ jobs:
         id: core
         uses: ./.github/actions/openms-core
         with:
-          mode: ${{ inputs.core_mode }}
+          # an explicit core_ref is built from source (the SDK has no ref to choose)
+          mode: ${{ inputs.core_mode || (inputs.core_ref != '' && 'source') || '' }}
           ref: ${{ needs.version.outputs.core_ref }}
           exact: "true"
           channel: ${{ needs.version.outputs.core_channel }}
           version: ${{ needs.version.outputs.version }}
+          # the nightly of OpenMS may still be uploading when the GUI nightly starts
+          wait: ${{ needs.version.outputs.core_channel == 'nightly' && '120' || '0' }}
           ssh_key: ${{ secrets.ARCHIVE_RRSYNC_SSH }}
           ssh_host: ${{ secrets.ARCHIVE_RRSYNC_HOST }}
           ssh_port: ${{ secrets.ARCHIVE_RRSYNC_PORT }}

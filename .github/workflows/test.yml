@@ -98,7 +98,8 @@ jobs:
         id: core
         uses: ./.github/actions/openms-core
         with:
-          mode: ${{ inputs.core_mode }}
+          # an explicit core_ref is built from source (the SDK has no ref to choose)
+          mode: ${{ inputs.core_mode || (inputs.core_ref != '' && 'source') || '' }}
           ref: ${{ inputs.core_ref || env.OPENMS_CORE_DEFAULT_REF }}
           exact: ${{ inputs.core_exact && 'true' || 'false' }}
           channel: ${{ inputs.core_channel || 'nightly' }}

@@ -17,12 +17,13 @@ description: >-
             no TOPP tools and no example data).
 
   THE DEFAULT MODE (used when 'mode' is empty) is set in the first step below,
-  DEFAULT_MODE: 'source', because the nightlies and releases of OpenMS up to now are
-  built WITH_GUI=ON: their tool registry lists ExecutePipeline and ImageCreator,
-  which cmake/find_openms.cmake rejects (both registries in one installation make
-  every TOPP tool fail). Once OpenMS no longer has the WITH_GUI option and a nightly
-  without the GUI is published, change it to 'sdk'. That is the only place to
-  change: the workflows pass a mode only where they need a specific one.
+  DEFAULT_MODE: 'sdk', the published nightly (or release) of OpenMS. Nightlies from
+  before the GUI moved here (before 2026-11-09) are built WITH_GUI=ON: their tool
+  registry lists ExecutePipeline and ImageCreator, which cmake/find_openms.cmake
+  rejects (both registries in one installation make every TOPP tool fail); build the
+  core with mode 'source' to test against such a commit, or against an OpenMS change
+  that is not in a nightly yet. That is the only place to change: the workflows pass
+  a mode only where they need a specific one.
 
 inputs:
   mode:
@@ -51,6 +52,12 @@ inputs:
       release X.Y.Z
     required: false
     default: "latest"
+  wait:
+    description: >-
+      sdk: minutes to wait for the folder given by 'version' while it is not complete yet
+      (it is still being uploaded); not used for 'latest'
+    required: false
+    default: "0"
   sdk:
     description: >-
       sdk: 'false' installs only the OpenMS installer (prefix_path is then empty), for
@@ -101,9 +108,8 @@ runs:
       shell: bash
       env:
         MODE: ${{ inputs.mode }}
-        # The default mode: 'source' while the OpenMS nightlies still contain the GUI,
-        # then 'sdk' (see the description of this action).
-        DEFAULT_MODE: source
+        # The default mode (see the description of this action).
+        DEFAULT_MODE: sdk
       run: |
         mode=${MODE:-$DEFAULT_MODE}
         case "$mode" in
@@ -391,6 +397,7 @@ runs:
         CHANNEL: ${{ inputs.channel }}
         VERSION: ${{ inputs.version }}
         NEED_SDK: ${{ inputs.sdk }}
+        OPENMS_SDK_WAIT_MINUTES: ${{ inputs.wait }}
       run: |
         bash "$GITHUB_ACTION_PATH/resolve-sdk.sh" "$CHANNEL" "$VERSION" "$RUNNER_OS" "$RUNNER_ARCH" "$NEED_SDK" |
           tee -a "$GITHUB_OUTPUT"
@@ -424,6 +431,7 @@ runs:
         CORE_DIR: ${{ steps.setup.outputs.core_dir }}
         DOWNLOAD_DIR: ${{ steps.setup.outputs.download_dir }}
         SDK_NAME: ${{ steps.sdk-resolve.outputs.sdk_name }}
+        FULLSTRING: ${{ steps.sdk-resolve.outputs.version_fullstring }}
       run: |
         set -euo pipefail
         rm -rf "$CORE_DIR"
@@ -438,6 +446,20 @@ runs:
         if [[ ! -d "$sdk_dir" ]]; then
           echo >&2 "ERROR: the SDK archive has no folder ${sdk_dir##*/}"
           ls "$CORE_DIR"
+          exit 1
+        fi
+        # The SDK and the installer must come from one build of OpenMS: the GUI layer is
+        # compiled against the SDK and run against the installer. A folder of the archive
+        # can hold both from different builds while a later run of the same day is
+        # uploading. The SDK's CMake package names its full version string.
+        sdk_fullstring=$(sed -n 's/^set(OpenMS_VERSION_FULLSTRING "\(.*\)")[[:space:]]*$/\1/p' \
+          "$sdk_dir/lib/cmake/OpenMS/OpenMSConfig.cmake" "$sdk_dir/CMake/OpenMSConfig.cmake" 2>/dev/null | head -n 1 || true)
+        if [[ -z "$sdk_fullstring" ]]; then
+          echo >&2 "ERROR: the SDK's OpenMSConfig.cmake names no OpenMS_VERSION_FULLSTRING (an OpenMS from before 3.7, which this GUI layer cannot use)"
+          exit 1
+        fi
+        if [[ "$sdk_fullstring" != "$FULLSTRING" ]]; then
+          echo >&2 "ERROR: the SDK is OpenMS $sdk_fullstring, the installer OpenMS $FULLSTRING: they come from different builds (an upload in progress?)"
           exit 1
         fi
         echo "sdk_dir=$sdk_dir" >>"$GITHUB_OUTPUT"
