@@ -454,7 +454,11 @@ runs:
         # uploading. The SDK's CMake package names its full version string.
         sdk_fullstring=$(sed -n 's/^set(OpenMS_VERSION_FULLSTRING "\(.*\)")[[:space:]]*$/\1/p' \
           "$sdk_dir/lib/cmake/OpenMS/OpenMSConfig.cmake" "$sdk_dir/CMake/OpenMSConfig.cmake" 2>/dev/null | head -n 1 || true)
-        if [[ -n "$sdk_fullstring" && "$sdk_fullstring" != "$FULLSTRING" ]]; then
+        if [[ -z "$sdk_fullstring" ]]; then
+          echo >&2 "ERROR: the SDK's OpenMSConfig.cmake names no OpenMS_VERSION_FULLSTRING (an OpenMS from before 3.7, which this GUI layer cannot use)"
+          exit 1
+        fi
+        if [[ "$sdk_fullstring" != "$FULLSTRING" ]]; then
           echo >&2 "ERROR: the SDK is OpenMS $sdk_fullstring, the installer OpenMS $FULLSTRING: they come from different builds (an upload in progress?)"
           exit 1
         fi
