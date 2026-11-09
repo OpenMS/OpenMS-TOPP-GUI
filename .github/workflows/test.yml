@@ -62,11 +62,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # The OpenMS branch the core is built from when no core_ref is given. Until
-  # OpenMS/OpenMS#10844 (which removes the GUI from OpenMS and adds the PATH lookup
-  # of TOPP tools that ExecutePipeline needs on Windows) is merged, that is its branch;
-  # afterwards set it back to develop.
-  OPENMS_CORE_DEFAULT_REF: claude/jolly-babbage-s52h8n
+  # The OpenMS branch the core is built from when no core_ref is given.
+  OPENMS_CORE_DEFAULT_REF: develop
 
 jobs:
   build-and-test:
