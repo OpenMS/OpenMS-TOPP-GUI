@@ -1,0 +1,118 @@
+name: "Build and Test"
+
+# Builds and tests the GUI layer against an OpenMS core without GUI; where the
+# core comes from is decided by .github/actions/openms-core (default: built from
+# OpenMS develop, the newest cached build of it for pushes and pull requests).
+on:
+  workflow_dispatch:
+    inputs:
+      core_mode:
+        description: "Where the OpenMS core comes from: source, sdk, or empty for the default of the openms-core action"
+        type: string
+        default: ""
+      core_ref:
+        description: "source: branch, tag or commit of OpenMS/OpenMS (empty: OPENMS_CORE_DEFAULT_REF below)"
+        type: string
+        default: ""
+      core_exact:
+        description: "source: build the current commit of core_ref instead of taking the newest cached build of it"
+        type: boolean
+        default: false
+      core_channel:
+        description: "sdk: nightly or release"
+        type: string
+        default: "nightly"
+      core_version:
+        description: "sdk: latest, a nightly date YYYY.MM.DD or a release X.Y.Z"
+        type: string
+        default: "latest"
+  # used by nightly.yml
+  workflow_call:
+    inputs:
+      core_mode:
+        type: string
+        default: ""
+      core_ref:
+        type: string
+        default: "develop"
+      core_exact:
+        type: boolean
+        default: false
+      core_channel:
+        type: string
+        default: "nightly"
+      core_version:
+        type: string
+        default: "latest"
+  push:
+    branches:
+      - develop
+      - nightly
+      - release/*
+  pull_request:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+
+# Cancel superseded PR runs without queuing or cancelling non-PR runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The OpenMS branch the core is built from when no core_ref is given.
+  OPENMS_CORE_DEFAULT_REF: develop
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            compiler: cl.exe
+          - os: macos-15
+            compiler: xcode
+          - os: ubuntu-24.04
+            compiler: g++
+          - os: ubuntu-24.04-arm
+            compiler: g++
+          - os: ubuntu-24.04
+            compiler: clang++
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Dependencies
+        id: deps
+        uses: ./.github/actions/dependencies
+        with:
+          compiler: ${{ matrix.compiler }}
+
+      - name: Provide the OpenMS Core
+        id: core
+        uses: ./.github/actions/openms-core
+        with:
+          mode: ${{ inputs.core_mode }}
+          ref: ${{ inputs.core_ref || env.OPENMS_CORE_DEFAULT_REF }}
+          exact: ${{ inputs.core_exact && 'true' || 'false' }}
+          channel: ${{ inputs.core_channel || 'nightly' }}
+          version: ${{ inputs.core_version || 'latest' }}
+          ssh_key: ${{ secrets.ARCHIVE_RRSYNC_SSH }}
+          ssh_host: ${{ secrets.ARCHIVE_RRSYNC_HOST }}
+          ssh_port: ${{ secrets.ARCHIVE_RRSYNC_PORT }}
+          ssh_user: ${{ secrets.ARCHIVE_RRSYNC_USER }}
+
+      - name: Build and Test the GUI Layer
+        uses: ./.github/actions/build
+        with:
+          compiler: ${{ matrix.compiler }}
+          prefix_path: ${{ steps.core.outputs.prefix_path }};${{ steps.deps.outputs.cmake_prefix }}
+          topp_bin_dir: ${{ steps.core.outputs.bin_dir }}
+          examples_dir: ${{ steps.core.outputs.examples_dir }}
+          core_version_fullstring: ${{ steps.core.outputs.version_fullstring }}

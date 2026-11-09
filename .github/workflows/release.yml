@@ -1,0 +1,568 @@
+name: "Release"
+
+# Builds, tests and packages the GUI layer on every platform, checks each package
+# by installing it on top of the OpenMS installer it belongs to, uploads the
+# packages to the archive server next to the OpenMS installers
+# (/OpenMSInstaller/<type>/<version>/, e.g. nightly/2026.11.07 or release/3.7.0)
+# and, for a tag vX.Y.Z, publishes a GitHub release.
+#
+# The OpenMS core the packages are built against: the tag vX.Y.Z of OpenMS for a
+# tag of this repository, otherwise the branch nightly (the commit of today's
+# OpenMS nightly installers), unless the input core_ref says otherwise. The smoke
+# test takes the OpenMS installer of the same version from the archive server
+# (release/X.Y.Z, or nightly/<date of this run>).
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: >-
+          Upload the packages to the archive server and publish a tagged release.
+          Off, the workflow only builds and keeps its artifacts on the run: a dry
+          run of the release workflow on any branch.
+        type: boolean
+        default: true
+      core_ref:
+        description: "Branch, tag or commit of OpenMS/OpenMS to build against (default: vX.Y.Z for a release, else nightly)"
+        type: string
+        default: ""
+      core_mode:
+        description: "Where the OpenMS core comes from: source, sdk, or empty for the default of the openms-core action"
+        type: string
+        default: ""
+  # used by nightly.yml for the nightly installers
+  workflow_call:
+    inputs:
+      deploy:
+        type: boolean
+        default: true
+      core_ref:
+        type: string
+        default: ""
+      core_mode:
+        type: string
+        default: ""
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: "Version"
+    runs-on: ubuntu-latest
+    outputs:
+      has_version: ${{ steps.version.outputs.has_version }}
+      version: ${{ steps.version.outputs.version }}
+      version_name: ${{ steps.version.outputs.name }}
+      version_type: ${{ steps.version.outputs.type }}
+      core_ref: ${{ steps.core.outputs.ref }}
+      core_channel: ${{ steps.core.outputs.channel }}
+      deploy: ${{ steps.core.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - name: Parse the Version Number
+        id: version
+        uses: ./.github/actions/version
+
+      - name: Choose the OpenMS Core
+        id: core
+        shell: bash
+        env:
+          CORE_REF: ${{ inputs.core_ref }}
+          TYPE: ${{ steps.version.outputs.type }}
+          EVENT: ${{ github.event_name }}
+          DEPLOY: ${{ inputs.deploy }}
+        run: |
+          # a tag of this repository is built against the same tag of OpenMS (a
+          # release or a release candidate), everything else against today's nightly
+          if [[ -z "$CORE_REF" ]]; then
+            if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+              CORE_REF=$GITHUB_REF_NAME
+            else
+              CORE_REF=nightly
+            fi
+          fi
+          # a push of a tag always deploys; otherwise the input decides
+          if [[ "$EVENT" == push || "$DEPLOY" == true ]]; then
+            deploy=true
+          else
+            deploy=false
+          fi
+          {
+            echo "ref=$CORE_REF"
+            # the folder of the OpenMS installers on the archive server: the channel
+            # is the version type (nightly, release, rc<N>), the folder the version
+            echo "channel=$TYPE"
+            echo "deploy=$deploy"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  build-and-test:
+    name: "Build, Test, and Package"
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Only one entry per operating system allowed.
+          - os: windows-2025
+            compiler: cl.exe
+          - os: macos-15
+            compiler: xcode
+          - os: ubuntu-24.04
+            compiler: g++
+          - os: ubuntu-24.04-arm
+            compiler: g++
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Dependencies
+        id: deps
+        uses: ./.github/actions/dependencies
+        with:
+          compiler: ${{ matrix.compiler }}
+          doc: "true"
+
+      - name: Provide the OpenMS Core
+        id: core
+        uses: ./.github/actions/openms-core
+        with:
+          mode: ${{ inputs.core_mode }}
+          ref: ${{ needs.version.outputs.core_ref }}
+          exact: "true"
+          channel: ${{ needs.version.outputs.core_channel }}
+          version: ${{ needs.version.outputs.version }}
+          ssh_key: ${{ secrets.ARCHIVE_RRSYNC_SSH }}
+          ssh_host: ${{ secrets.ARCHIVE_RRSYNC_HOST }}
+          ssh_port: ${{ secrets.ARCHIVE_RRSYNC_PORT }}
+          ssh_user: ${{ secrets.ARCHIVE_RRSYNC_USER }}
+
+      - name: Build and Test the GUI Layer
+        id: build
+        uses: ./.github/actions/build
+        with:
+          compiler: ${{ matrix.compiler }}
+          prefix_path: ${{ steps.core.outputs.prefix_path }};${{ steps.deps.outputs.cmake_prefix }}
+          topp_bin_dir: ${{ steps.core.outputs.bin_dir }}
+          examples_dir: ${{ steps.core.outputs.examples_dir }}
+          core_version_fullstring: ${{ steps.core.outputs.version_fullstring }}
+          # the packages include the documentation of the GUI tools (component doc_gui)
+          cmake_args: -DENABLE_DOCS=ON
+
+      # A failure here does not stop the release: the packages are then made without
+      # the documentation (component doc_gui installs only what was built).
+      - name: Build the Documentation
+        id: doc
+        continue-on-error: true
+        shell: bash
+        env:
+          PRESET: ${{ steps.build.outputs.preset }}
+        run: cmake --build "build/$PRESET" --target doc
+
+      - name: Report a Failed Documentation Build
+        if: steps.doc.outcome == 'failure'
+        shell: bash
+        run: echo "::warning::The documentation could not be built; the packages of ${{ runner.os }} ${{ runner.arch }} do not contain it."
+
+      # One copy of the html for the archive (deploy-docs below).
+      - name: Upload the Documentation
+        if: steps.doc.outcome == 'success' && runner.os == 'Linux' && runner.arch == 'X64'
+        uses: actions/upload-artifact@v7
+        with:
+          name: documentation-gui
+          path: build/${{ steps.build.outputs.preset }}/doc/html-gui
+
+      - name: Compute Package Type
+        id: package-info
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            echo "type=deb" >>"$GITHUB_OUTPUT"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            echo "type=pkg" >>"$GITHUB_OUTPUT"
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "type=nsis" >>"$GITHUB_OUTPUT"
+          else
+            echo >&2 "ERROR: unrecognized RUNNER_OS=$RUNNER_OS"
+            exit 1
+          fi
+
+      - name: Import Apple Developer Certificates
+        id: apple-certs
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERT }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_PASSWORD }}
+          INSTALLER_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_CERT }}
+          INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          if [[ -n "$APPLE_CERTIFICATE" ]]; then
+            echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+            echo "$INSTALLER_CERTIFICATE" | base64 --decode > installer_certificate.p12
+            security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+            security list-keychains -d user -s build.keychain
+            security default-keychain -s build.keychain
+            security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+            security set-keychain-settings -t 3600 -u build.keychain
+            security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild
+            security import installer_certificate.p12 -k build.keychain -P "$INSTALLER_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productsign -T /usr/bin/productbuild
+            security set-key-partition-list -S apple-tool:,apple:,codesign:,productsign:,productbuild: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+            rm -f certificate.p12 installer_certificate.p12
+
+            echo "=== Available signing identities ==="
+            security find-identity -v -p codesigning build.keychain
+            echo "has_cert=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "has_cert=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Package
+        shell: bash
+        env:
+          PACKAGE_TYPE: ${{ steps.package-info.outputs.type }}
+          HAVE_APPLE_CERT: ${{ runner.os == 'macOS' && steps.apple-certs.outputs.has_cert }}
+          SIGNING_IDENTITY: "Developer ID Application: OpenMS Inc. (C64UCGJ5PL)"
+          SIGNING_EMAIL: "apple@openms.de"
+          CPACK_PRODUCTBUILD_IDENTITY_NAME: "Developer ID Installer: OpenMS Inc. (C64UCGJ5PL)"
+          PRESET: ${{ steps.build.outputs.preset }}
+          MACOSX_DEPLOYMENT_TARGET: "15.0"
+        run: |
+          set -euo pipefail
+          build_dir="$GITHUB_WORKSPACE/build/$PRESET"
+
+          cmake_options=(
+            "-DPACKAGE_TYPE=$PACKAGE_TYPE"
+          )
+
+          if [[ "$HAVE_APPLE_CERT" == "true" ]]; then
+            cmake_options+=(
+              "-DSIGNING_IDENTITY=$SIGNING_IDENTITY"
+              "-DSIGNING_EMAIL=$SIGNING_EMAIL"
+              "-DCPACK_PRODUCTBUILD_IDENTITY_NAME=$CPACK_PRODUCTBUILD_IDENTITY_NAME"
+            )
+          fi
+
+          # makensis.exe opens every staged file through the Win32 file APIs, which
+          # are bound by MAX_PATH (260 characters). CPack stages below the build
+          # directory by default; a short, fixed staging directory keeps the paths
+          # well below the limit. The installer is moved back next to the other
+          # build output below.
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            rm -rf "/c/cpk"
+            mkdir -p "/c/cpk"
+            cmake_options+=("-DCPACK_PACKAGE_DIRECTORY=C:/cpk")
+          fi
+
+          cmake "${cmake_options[@]}" "$build_dir"
+
+          if ! cmake --build "$build_dir" --target dist; then
+            if [[ "$RUNNER_OS" == "Windows" ]]; then
+              cat /c/cpk/_CPack_Packages/win64/NSIS/NSISOutput.log || true
+            fi
+            exit 1
+          fi
+
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            mv /c/cpk/*.exe "$build_dir/"
+          fi
+          ls -l "$build_dir"/*.exe "$build_dir"/*.deb "$build_dir"/*.pkg 2>/dev/null || true
+
+      # Submits the signed package to Apple for notarization and staples the ticket.
+      - name: Notarize macOS Package
+        if: runner.os == 'macOS' && steps.apple-certs.outputs.has_cert == 'true'
+        shell: bash
+        env:
+          APPLE_APP_SPECIFIC_NOTARIZATION_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_NOTARIZATION_PASSWORD }}
+          TEAM_ID: "C64UCGJ5PL"
+          PRESET: ${{ steps.build.outputs.preset }}
+        run: |
+          echo "=== Starting macOS package notarization ==="
+          cd "build/$PRESET"
+
+          PKG_FILE=$(find . -maxdepth 1 -name 'OpenMS-GUI-*.pkg' | head -n 1)
+          if [[ -z "$PKG_FILE" ]]; then
+            echo "Error: No .pkg file found in build directory"
+            ls -la
+            exit 1
+          fi
+
+          echo "Found package: $PKG_FILE"
+
+          "$GITHUB_WORKSPACE/cmake/MacOSX/notarize.sh" \
+            "$PKG_FILE" \
+            "de.openms.gui" \
+            "apple@openms.de" \
+            "APPLE_APP_SPECIFIC_NOTARIZATION_PASSWORD" \
+            "$TEAM_ID" \
+            "$GITHUB_WORKSPACE/build/$PRESET"
+
+          echo "=== Notarization complete ==="
+
+          echo "=== Verifying package signing and notarization ==="
+          pkgutil --check-signature "$PKG_FILE" || echo "Warning: pkgutil verification returned non-zero"
+          spctl -a -vvv -t install "$PKG_FILE" || echo "Warning: spctl assessment returned non-zero"
+
+      - name: Upload Packages as Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ format('installer-{0}-{1}-{2}', needs.version.outputs.version_name, runner.os, runner.arch) }}
+          if-no-files-found: error
+          path: |
+            ${{ github.workspace }}/build/${{ steps.build.outputs.preset }}/OpenMS-GUI-*.exe
+            ${{ github.workspace }}/build/${{ steps.build.outputs.preset }}/OpenMS-GUI-*.deb
+            ${{ github.workspace }}/build/${{ steps.build.outputs.preset }}/OpenMS-GUI-*.pkg
+
+  # Installs each package the way users do: the OpenMS installer of the same
+  # version first, then the GUI package into its installation, and starts the GUI
+  # tools without a display.
+  smoke-test:
+    name: "Smoke Test the Package"
+    needs:
+      - version
+      - build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-15, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - name: Download the Package
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ format('installer-{0}-{1}-{2}', needs.version.outputs.version_name, runner.os, runner.arch) }}
+          path: ${{ runner.temp }}/gui-package
+
+      - name: Install the OpenMS Installer
+        id: core
+        uses: ./.github/actions/openms-core
+        with:
+          mode: sdk
+          sdk: "false"
+          channel: ${{ needs.version.outputs.core_channel }}
+          version: ${{ needs.version.outputs.version }}
+
+      # An OpenMS installer from before the split ships the GUI tools itself; the
+      # GUI package cannot be installed on top of it.
+      - name: Check the OpenMS Installation
+        id: presplit
+        shell: bash
+        env:
+          INSTALL_DIR: ${{ steps.core.outputs.install_dir }}
+        run: |
+          # (the macOS installer has the app bundles in the root of its folder, not in bin/)
+          if [[ -e "$INSTALL_DIR/bin/TOPPView" || -e "$INSTALL_DIR/bin/TOPPView.exe" || -e "$INSTALL_DIR/TOPPView.app" ]]; then
+            echo "::warning::The OpenMS installer still contains the GUI tools (an OpenMS from before the split); the smoke test of the GUI package is skipped."
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Install the GUI Package (Linux)
+        if: runner.os == 'Linux' && steps.presplit.outputs.skip == 'false'
+        shell: bash
+        run: |
+          sudo apt-get -qq install -y --no-install-recommends "$RUNNER_TEMP"/gui-package/OpenMS-GUI-*.deb
+
+      - name: Install the GUI Package (macOS)
+        if: runner.os == 'macOS' && steps.presplit.outputs.skip == 'false'
+        shell: bash
+        run: |
+          for pkg in "$RUNNER_TEMP"/gui-package/OpenMS-GUI-*.pkg; do
+            sudo installer -pkg "$pkg" -target /
+          done
+
+      # The add-on installer finds the OpenMS installation in the registry. Silent mode
+      # needs the install mode of that installation (all users, see openms-core).
+      - name: Install the GUI Package (Windows)
+        if: runner.os == 'Windows' && steps.presplit.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "$env:RUNNER_TEMP\gui-package\OpenMS-GUI-*.exe" | Select-Object -First 1
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList '/S', '/allusers' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "The GUI installer failed with exit code $($p.ExitCode)" }
+
+      - name: Run the GUI Tools
+        if: steps.presplit.outputs.skip == 'false'
+        shell: bash
+        env:
+          INSTALL_DIR: ${{ steps.core.outputs.install_dir }}
+        run: |
+          set -euo pipefail
+          bin="$INSTALL_DIR/bin"
+          # the executables of the GUI applications (on macOS inside the bundles, which the
+          # package installs into the root of the OpenMS folder, next to bin/)
+          app() {
+            local candidate
+            for candidate in "$INSTALL_DIR/$1.app/Contents/MacOS/$1" "$bin/$1.exe" "$bin/$1"; do
+              if [[ -f "$candidate" ]]; then
+                echo "$candidate"
+                return
+              fi
+            done
+            echo >&2 "ERROR: $1 is not installed in $INSTALL_DIR"
+            ls -l "$INSTALL_DIR" "$bin" >&2
+            return 1
+          }
+          for tool in TOPPView ExecutePipeline; do
+            exe=$(app "$tool")
+            echo "=== $exe --help"
+            "$exe" --help
+          done
+          # the GUI TOPP tools are registered next to those of OpenMS
+          "$(app FileInfo)" --help >/dev/null
+
+  deploy-installer:
+    name: "Deploy Installer"
+    if: ${{ needs.version.outputs.deploy == 'true' }}
+    runs-on: ubuntu-latest
+    needs:
+      - version
+      - build-and-test
+      - smoke-test
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - name: Download the Installer
+        uses: actions/download-artifact@v8
+        with:
+          pattern: installer-*
+          merge-multiple: true
+          path: ${{ github.workspace }}/downloads
+
+      # Into the folder of the OpenMS installers of the same version. The 'latest'
+      # link of that folder belongs to OpenMS and is not touched.
+      - name: Upload Installer
+        uses: ./.github/actions/rsync
+        with:
+          key: ${{ secrets.ARCHIVE_RRSYNC_SSH }}
+          user: ${{ secrets.ARCHIVE_RRSYNC_USER }}
+          host: ${{ secrets.ARCHIVE_RRSYNC_HOST }}
+          port: ${{ secrets.ARCHIVE_RRSYNC_PORT }}
+          src: ${{ github.workspace }}/downloads/*
+          dst: /OpenMSInstaller/${{ needs.version.outputs.version_type }}/${{ needs.version.outputs.version }}
+          # rsync creates only the last directory of dst by itself; the folder of
+          # a release exists if OpenMS published its installers first, the
+          # nightly/ folder exists anyway
+          mkpath: ${{ needs.version.outputs.has_version }}
+
+  # Next to the html of OpenMS of the same version: /Documentation/<type>/<version>/html-gui.
+  # The GUI applications link there (Help menu) when no local documentation is installed.
+  deploy-docs:
+    name: "Deploy Documentation"
+    if: ${{ needs.version.outputs.deploy == 'true' }}
+    runs-on: ubuntu-latest
+    needs:
+      - version
+      - build-and-test
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - name: Download the Documentation
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: documentation-gui
+          path: ${{ github.workspace }}/html-gui
+
+      - name: Upload Documentation
+        if: steps.download.outcome == 'success'
+        uses: ./.github/actions/rsync
+        with:
+          key: ${{ secrets.ARCHIVE_RRSYNC_SSH }}
+          user: ${{ secrets.ARCHIVE_RRSYNC_USER }}
+          host: ${{ secrets.ARCHIVE_RRSYNC_HOST }}
+          port: ${{ secrets.ARCHIVE_RRSYNC_PORT }}
+          src: ${{ github.workspace }}/html-gui
+          dst: /Documentation/${{ needs.version.outputs.version_type }}/${{ needs.version.outputs.version }}
+          mkpath: ${{ needs.version.outputs.has_version }}
+
+  publish-release:
+    name: "Publish Release"
+    if: ${{ needs.version.outputs.has_version == 'true' && needs.version.outputs.deploy == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    needs:
+      - version
+      - deploy-installer
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            CHANGELOG
+
+      # The section of this version in the CHANGELOG: from its banner
+      # ("----  OpenMS-TOPP-GUI X.Y.Z ...") to the banner of the previous release.
+      - name: Create Release Notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        shell: bash
+        run: |
+          python3 - <<'EOF'
+          import os
+          import re
+
+          version = os.environ["VERSION"]
+          lines = open("CHANGELOG", encoding="utf-8").read().splitlines()
+          banners = [i for i, l in enumerate(lines) if re.match(r"^----\s+OpenMS-TOPP-GUI\s+\S+", l)]
+          start = next((i for i in banners
+                        if re.match(r"^----\s+OpenMS-TOPP-GUI\s+" + re.escape(version) + r"\b", lines[i])), None)
+          if start is None:
+              raise SystemExit(f"CHANGELOG has no section for OpenMS-TOPP-GUI {version}")
+          # the body starts after the closing line of dashes of the banner
+          body = start + 1
+          while body < len(lines) and lines[body].startswith("----"):
+              body += 1
+          # and ends before the opening line of dashes of the next banner
+          later = [i for i in banners if i > start]
+          end = later[0] - 1 if later else len(lines)
+          while end > body and not lines[end - 1].strip("- "):
+              end -= 1
+          notes = "\n".join(lines[body:end]).strip("\n")
+          header = (f"OpenMS-TOPP-GUI {version}, the graphical tools of OpenMS (TOPPView, TOPPAS, "
+                    f"INIFileEditor). Install it on top of OpenMS {version}: the packages are add-ons "
+                    f"to the OpenMS installers of the same version.\n\n")
+          open("release-notes.txt", "w", encoding="utf-8").write(header + notes + "\n")
+          EOF
+          cat release-notes.txt
+
+      - name: Download the Installer
+        uses: actions/download-artifact@v8
+        with:
+          pattern: installer-*
+          merge-multiple: true
+          path: ${{ github.workspace }}/downloads
+
+      - name: Publish the Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: Release ${{ needs.version.outputs.version }}
+          body_path: release-notes.txt
+          make_latest: true
+          files: downloads/*

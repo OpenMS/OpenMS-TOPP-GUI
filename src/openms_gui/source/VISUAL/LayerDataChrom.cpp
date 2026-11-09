@@ -20,7 +20,6 @@
 #include <OpenMS/VISUAL/VISITORS/LayerStoreData.h>
 #include <OpenMS/METADATA/AnnotatedMSRun.h>
 
-#include <boost/make_shared.hpp>
 
 using namespace std;
 

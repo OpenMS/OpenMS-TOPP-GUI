@@ -16,12 +16,10 @@
   @image html TOPPView.png
 
   More information about TOPPView can be found on the OpenMS ReadTheDocs
-  page: https://openms.readthedocs.io/en/latest/openms-applications-and-tools/visualize-with-openms.html
+  page: https://openms.readthedocs.io/en/latest/getting-started/visualize-with-openms.html
 
-  @if WITH_GUI
   <B>The command line parameters of this tool are:</B>
   @verbinclude TOPP_TOPPView.cli
-  @endif
   
   Note: By default, TOPPView scans for novel TOPP tools if there has been a version update. To force a rescan you
   can pass the --force flag. To skip the scan for tools, you can pass the --skip_tool_scan flag.

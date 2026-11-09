@@ -1,0 +1,10 @@
+This package contains the graphical applications of OpenMS:
+
+TOPPView - a viewer for mass spectrometry data
+TOPPAS - an editor and runner for pipelines of TOPP tools
+INIFileEditor - an editor for the parameter files of the TOPP tools
+
+and the TOPP tools that need the GUI library (ExecutePipeline, ImageCreator).
+It is installed into the installation of OpenMS of the same version.
+
+For more information visit our website at www.OpenMS.de.

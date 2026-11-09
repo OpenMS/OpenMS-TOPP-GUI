@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/GUISTYLE">
+        <file>qtStyleSheet.qss</file>
+    </qresource>
+</RCC>

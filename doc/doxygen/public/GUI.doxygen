@@ -1,0 +1,86 @@
+// Copyright (c) 2002-present, OpenMS Inc. -- EKU Tuebingen, ETH Zurich, and FU Berlin
+// SPDX-License-Identifier: BSD-3-Clause
+//
+// --------------------------------------------------------------------------
+// $Maintainer:  $
+// $Authors: $
+// --------------------------------------------------------------------------
+
+/**
+  @mainpage %OpenMS GUI documentation
+
+  The graphical tools of %OpenMS and the library they are built on, OpenMS_GUI.
+  They are developed in the repository
+  <a href="https://github.com/OpenMS/OpenMS-TOPP-GUI">OpenMS-TOPP-GUI</a> and are built and
+  installed on top of an %OpenMS installation of the same version (the %OpenMS library, the
+  TOPP tools and the shared data come from there).
+
+  All aspects of using %OpenMS (installation, workflows, user tutorials, including those for
+  TOPPView) are described on the
+  <a href="https://openms.readthedocs.io/en/latest/index.html">%OpenMS ReadTheDocs website</a>.
+  The documentation of the %OpenMS library and of all other TOPP tools is the
+  <a href="https://archive.openms.de/openms/Documentation/release/latest/html/index.html">%OpenMS API reference</a>
+  (<a href="https://archive.openms.de/openms/Documentation/nightly/latest/html/index.html">nightly</a>).
+
+  <H3>Graphical tools</H3>
+  <UL>
+    <LI> @subpage TOPP_TOPPView - visualization and analysis of MS data
+    <LI> @subpage TOPP_TOPPAS - design and execution of TOPP workflows
+    <LI> @subpage TOPP_INIFileEditor - editor for the parameter (INI) files of TOPP tools
+  </UL>
+
+  <H3>TOPP tools that need the GUI library</H3>
+  <UL>
+    <LI> @subpage TOPP_ExecutePipeline - runs TOPPAS workflows on the command line
+    <LI> @subpage TOPP_ImageCreator - writes an LC-MS map as an image
+  </UL>
+
+  <H3>Tutorials</H3>
+  <UL>
+    <LI> @subpage TOPPAS_tutorial
+    <LI> @subpage GUI_developer_notes
+  </UL>
+
+  <H3>The GUI library</H3>
+  The classes of the GUI library are grouped in the module @ref Visual (see also the class
+  list). The code examples in <code>doc/code_examples/Tutorial_GUI_*.cpp</code> show how to use
+  some of the widgets in an application of your own.
+*/
+
+/**
+  @page GUI_developer_notes Developing the GUI layer
+
+  @section GUI_dev_build Building
+
+  OpenMS-TOPP-GUI is built against an installed %OpenMS (or the %OpenMS SDK) of the same version
+  and Qt 6:
+  @code
+  cmake -S OpenMS-TOPP-GUI -B build -DCMAKE_PREFIX_PATH="<OpenMS prefix>;<Qt prefix>"
+  cmake --build build
+  ctest --test-dir build
+  @endcode
+  The repository's README.md lists all options.
+
+  @section GUI_dev_widgets Using the widgets in your own application
+
+  Link the target <code>OpenMS::OpenMS_GUI</code> of the CMake package <code>OpenMSGUI</code>
+  (or ask for <code>find_package(OpenMS COMPONENTS GUI)</code>, which finds it when the GUI layer
+  is installed into the %OpenMS prefix). The examples:
+  <UL>
+    <LI> <code>Tutorial_GUI_ListEditor.cpp</code>: @ref OpenMS::ListEditor
+    <LI> <code>Tutorial_GUI_ParamEditor.cpp</code>: @ref OpenMS::ParamEditor, editing an INI file
+    <LI> <code>Tutorial_GUI_Plot1D.cpp</code>: @ref OpenMS::Plot1DWidget, showing a spectrum
+  </UL>
+  They are built by the target <code>Tutorials_build</code> (with <code>-DENABLE_TUTORIALS=ON</code>).
+
+  @section GUI_dev_tests How to add a new GUI test for a class
+
+  Suppose you want to create a GUI class for the class called <code>MyClass</code>.
+  To add a new GUI test:
+  <ol>
+  <li>Create the <code>MyClass_test.cpp</code> in <code>src/tests/class_tests/openms_gui/source</code>.</li>
+  <li>Add it to <code>src/tests/class_tests/openms_gui/CMakeLists.txt</code> in the GUI section.</li>
+  <li>Have a look at existing GUI tests, as they use the QT TestLib framework and not the %OpenMS macros.</li>
+  </ol>
+  Without a display, run the tests with <code>QT_QPA_PLATFORM=offscreen</code>.
+*/

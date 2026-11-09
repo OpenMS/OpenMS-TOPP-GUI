@@ -164,10 +164,10 @@ namespace OpenMS
     QMenu* help = new QMenu("&Help", this);
     menuBar()->addMenu(help);
     QAction* action = help->addAction("OpenMS website", this, &TOPPASBase::showURL);
-    action->setData("http://www.OpenMS.de");
+    action->setData("https://www.openms.de");
     action = help->addAction("TOPPAS tutorial", this, &TOPPASBase::showURL);
     action->setShortcut(Qt::Key_F1);
-    action->setData(toQString(std::string("html/TOPPAS_tutorial.html")));
+    action->setData(QString("html-gui/TOPPAS_tutorial.html")); // the documentation of the GUI layer
 
     help->addSeparator();
     help->addAction("&About", this, &TOPPASBase::showAboutDialog);

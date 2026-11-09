@@ -1,0 +1,445 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 24,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "description": "Common settings. The OpenMS core (and on macOS/Windows Qt) is found through CMAKE_PREFIX_PATH: pass -DCMAKE_PREFIX_PATH=\"<OpenMS prefix or SDK>;<Qt prefix>\" or set the environment variable CMAKE_PREFIX_PATH (list separator ':' on Linux/macOS, ';' on Windows). A compiler launcher such as ccache is taken from the environment variables CMAKE_C_COMPILER_LAUNCHER / CMAKE_CXX_COMPILER_LAUNCHER, which CMake reads by itself.",
+            "cacheVariables": {
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_COLOR_DIAGNOSTICS": "ON"
+            }
+        },
+        {
+            "name": "linux-base",
+            "hidden": true,
+            "inherits": "base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            }
+        },
+        {
+            "name": "macos-base",
+            "hidden": true,
+            "inherits": "base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            }
+        },
+        {
+            "name": "windows-base",
+            "hidden": true,
+            "inherits": "base",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            }
+        },
+        {
+            "name": "linux-x64-base",
+            "hidden": true,
+            "inherits": "linux-base"
+        },
+        {
+            "name": "linux-arm64-base",
+            "hidden": true,
+            "inherits": "linux-base"
+        },
+        {
+            "name": "macos-arm64-base",
+            "hidden": true,
+            "inherits": "macos-base",
+            "description": "OpenMP_ROOT is where Homebrew on Apple silicon keeps its keg-only libomp: an OpenMS built from source with it needs it again in its consumers (find_dependency(OpenMP) of OpenMSConfig.cmake). The OpenMS SDK bundles its libomp and points FindOpenMP at it itself. Homebrew's Qt (qtbase, qtsvg) is found with -DCMAKE_PREFIX_PATH=\"...;$(brew --prefix)\".",
+            "cacheVariables": {
+                "OpenMP_ROOT": "/opt/homebrew/opt/libomp"
+            }
+        },
+        {
+            "name": "windows-x64-base",
+            "hidden": true,
+            "inherits": "windows-base",
+            "description": "Windows x64: run from a Visual Studio developer shell (x64). The OpenMS core must be a Release (/MD) build or SDK for the Release presets; the Debug preset needs the Debug SDK (/MDd)."
+        },
+        {
+            "name": "debug-base",
+            "hidden": true,
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "release-base",
+            "hidden": true,
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "relwithdebinfo-base",
+            "hidden": true,
+            "inherits": "base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+            }
+        },
+        {
+            "name": "ci-base",
+            "hidden": true,
+            "description": "CI: all tests, the installed-consumer test, no Qt WebEngine (not available from every Qt source CI uses), no documentation (the release workflow enables it where needed).",
+            "cacheVariables": {
+                "ENABLE_CLASS_TESTING": "ON",
+                "ENABLE_TOPP_TESTING": "ON",
+                "ENABLE_PIPELINE_TESTING": "ON",
+                "OPENMS_TEST_INSTALLED_CONSUMER": "ON",
+                "NO_WEBENGINE_WIDGETS": "ON",
+                "ENABLE_DOCS": "OFF",
+                "ENABLE_TUTORIALS": "ON"
+            }
+        },
+        {
+            "name": "linux-x64-debug",
+            "displayName": "Linux x64 Debug",
+            "description": "OpenMS-TOPP-GUI on Linux x64, Debug",
+            "inherits": [
+                "linux-x64-base",
+                "debug-base"
+            ]
+        },
+        {
+            "name": "linux-x64-relwithdebinfo",
+            "displayName": "Linux x64 RelWithDebInfo",
+            "description": "OpenMS-TOPP-GUI on Linux x64, RelWithDebInfo",
+            "inherits": [
+                "linux-x64-base",
+                "relwithdebinfo-base"
+            ]
+        },
+        {
+            "name": "linux-x64-release",
+            "displayName": "Linux x64 Release",
+            "description": "OpenMS-TOPP-GUI on Linux x64, Release",
+            "inherits": [
+                "linux-x64-base",
+                "release-base"
+            ]
+        },
+        {
+            "name": "linux-arm64-debug",
+            "displayName": "Linux arm64 Debug",
+            "description": "OpenMS-TOPP-GUI on Linux arm64, Debug",
+            "inherits": [
+                "linux-arm64-base",
+                "debug-base"
+            ]
+        },
+        {
+            "name": "linux-arm64-relwithdebinfo",
+            "displayName": "Linux arm64 RelWithDebInfo",
+            "description": "OpenMS-TOPP-GUI on Linux arm64, RelWithDebInfo",
+            "inherits": [
+                "linux-arm64-base",
+                "relwithdebinfo-base"
+            ]
+        },
+        {
+            "name": "linux-arm64-release",
+            "displayName": "Linux arm64 Release",
+            "description": "OpenMS-TOPP-GUI on Linux arm64, Release",
+            "inherits": [
+                "linux-arm64-base",
+                "release-base"
+            ]
+        },
+        {
+            "name": "macos-arm64-debug",
+            "displayName": "macOS arm64 Debug",
+            "description": "OpenMS-TOPP-GUI on macOS arm64, Debug",
+            "inherits": [
+                "macos-arm64-base",
+                "debug-base"
+            ]
+        },
+        {
+            "name": "macos-arm64-relwithdebinfo",
+            "displayName": "macOS arm64 RelWithDebInfo",
+            "description": "OpenMS-TOPP-GUI on macOS arm64, RelWithDebInfo",
+            "inherits": [
+                "macos-arm64-base",
+                "relwithdebinfo-base"
+            ]
+        },
+        {
+            "name": "macos-arm64-release",
+            "displayName": "macOS arm64 Release",
+            "description": "OpenMS-TOPP-GUI on macOS arm64, Release",
+            "inherits": [
+                "macos-arm64-base",
+                "release-base"
+            ]
+        },
+        {
+            "name": "windows-x64-debug",
+            "displayName": "Windows x64 Debug",
+            "description": "OpenMS-TOPP-GUI on Windows x64, Debug",
+            "inherits": [
+                "windows-x64-base",
+                "debug-base"
+            ]
+        },
+        {
+            "name": "windows-x64-relwithdebinfo",
+            "displayName": "Windows x64 RelWithDebInfo",
+            "description": "OpenMS-TOPP-GUI on Windows x64, RelWithDebInfo",
+            "inherits": [
+                "windows-x64-base",
+                "relwithdebinfo-base"
+            ]
+        },
+        {
+            "name": "windows-x64-release",
+            "displayName": "Windows x64 Release",
+            "description": "OpenMS-TOPP-GUI on Windows x64, Release",
+            "inherits": [
+                "windows-x64-base",
+                "release-base"
+            ]
+        },
+        {
+            "name": "linux-x64-ci",
+            "displayName": "Linux x64 CI",
+            "description": "The CI preset on Linux x64 (Release)",
+            "inherits": [
+                "linux-x64-base",
+                "release-base",
+                "ci-base"
+            ],
+            "cacheVariables": {
+                "OPENMS_VERIFY_INTERFACE_HEADER_SETS": "ON"
+            }
+        },
+        {
+            "name": "linux-arm64-ci",
+            "displayName": "Linux arm64 CI",
+            "description": "The CI preset on Linux arm64 (Release)",
+            "inherits": [
+                "linux-arm64-base",
+                "release-base",
+                "ci-base"
+            ]
+        },
+        {
+            "name": "macos-arm64-ci",
+            "displayName": "macOS arm64 CI",
+            "description": "The CI preset on macOS arm64 (Release)",
+            "inherits": [
+                "macos-arm64-base",
+                "release-base",
+                "ci-base"
+            ]
+        },
+        {
+            "name": "windows-x64-ci",
+            "displayName": "Windows x64 CI",
+            "description": "The CI preset on Windows x64 (Release)",
+            "inherits": [
+                "windows-x64-base",
+                "release-base",
+                "ci-base"
+            ]
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "linux-x64-debug",
+            "configurePreset": "linux-x64-debug"
+        },
+        {
+            "name": "linux-x64-relwithdebinfo",
+            "configurePreset": "linux-x64-relwithdebinfo"
+        },
+        {
+            "name": "linux-x64-release",
+            "configurePreset": "linux-x64-release"
+        },
+        {
+            "name": "linux-arm64-debug",
+            "configurePreset": "linux-arm64-debug"
+        },
+        {
+            "name": "linux-arm64-relwithdebinfo",
+            "configurePreset": "linux-arm64-relwithdebinfo"
+        },
+        {
+            "name": "linux-arm64-release",
+            "configurePreset": "linux-arm64-release"
+        },
+        {
+            "name": "macos-arm64-debug",
+            "configurePreset": "macos-arm64-debug"
+        },
+        {
+            "name": "macos-arm64-relwithdebinfo",
+            "configurePreset": "macos-arm64-relwithdebinfo"
+        },
+        {
+            "name": "macos-arm64-release",
+            "configurePreset": "macos-arm64-release"
+        },
+        {
+            "name": "windows-x64-debug",
+            "configurePreset": "windows-x64-debug"
+        },
+        {
+            "name": "windows-x64-relwithdebinfo",
+            "configurePreset": "windows-x64-relwithdebinfo"
+        },
+        {
+            "name": "windows-x64-release",
+            "configurePreset": "windows-x64-release"
+        },
+        {
+            "name": "linux-x64-ci",
+            "configurePreset": "linux-x64-ci"
+        },
+        {
+            "name": "linux-arm64-ci",
+            "configurePreset": "linux-arm64-ci"
+        },
+        {
+            "name": "macos-arm64-ci",
+            "configurePreset": "macos-arm64-ci"
+        },
+        {
+            "name": "windows-x64-ci",
+            "configurePreset": "windows-x64-ci"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "test-base",
+            "hidden": true,
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error"
+            },
+            "environment": {
+                "QT_QPA_PLATFORM": "offscreen"
+            }
+        },
+        {
+            "name": "test-base-ci",
+            "hidden": true,
+            "execution": {
+                "jobs": 4
+            }
+        },
+        {
+            "name": "linux-x64-debug",
+            "configurePreset": "linux-x64-debug",
+            "inherits": "test-base"
+        },
+        {
+            "name": "linux-x64-relwithdebinfo",
+            "configurePreset": "linux-x64-relwithdebinfo",
+            "inherits": "test-base"
+        },
+        {
+            "name": "linux-x64-release",
+            "configurePreset": "linux-x64-release",
+            "inherits": "test-base"
+        },
+        {
+            "name": "linux-arm64-debug",
+            "configurePreset": "linux-arm64-debug",
+            "inherits": "test-base"
+        },
+        {
+            "name": "linux-arm64-relwithdebinfo",
+            "configurePreset": "linux-arm64-relwithdebinfo",
+            "inherits": "test-base"
+        },
+        {
+            "name": "linux-arm64-release",
+            "configurePreset": "linux-arm64-release",
+            "inherits": "test-base"
+        },
+        {
+            "name": "macos-arm64-debug",
+            "configurePreset": "macos-arm64-debug",
+            "inherits": "test-base"
+        },
+        {
+            "name": "macos-arm64-relwithdebinfo",
+            "configurePreset": "macos-arm64-relwithdebinfo",
+            "inherits": "test-base"
+        },
+        {
+            "name": "macos-arm64-release",
+            "configurePreset": "macos-arm64-release",
+            "inherits": "test-base"
+        },
+        {
+            "name": "windows-x64-debug",
+            "configurePreset": "windows-x64-debug",
+            "inherits": "test-base"
+        },
+        {
+            "name": "windows-x64-relwithdebinfo",
+            "configurePreset": "windows-x64-relwithdebinfo",
+            "inherits": "test-base"
+        },
+        {
+            "name": "windows-x64-release",
+            "configurePreset": "windows-x64-release",
+            "inherits": "test-base"
+        },
+        {
+            "name": "linux-x64-ci",
+            "configurePreset": "linux-x64-ci",
+            "inherits": [
+                "test-base",
+                "test-base-ci"
+            ]
+        },
+        {
+            "name": "linux-arm64-ci",
+            "configurePreset": "linux-arm64-ci",
+            "inherits": [
+                "test-base",
+                "test-base-ci"
+            ]
+        },
+        {
+            "name": "macos-arm64-ci",
+            "configurePreset": "macos-arm64-ci",
+            "inherits": [
+                "test-base",
+                "test-base-ci"
+            ]
+        },
+        {
+            "name": "windows-x64-ci",
+            "configurePreset": "windows-x64-ci",
+            "inherits": [
+                "test-base",
+                "test-base-ci"
+            ]
+        }
+    ]
+}

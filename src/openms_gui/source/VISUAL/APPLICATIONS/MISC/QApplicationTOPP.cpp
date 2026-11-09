@@ -69,8 +69,9 @@ namespace OpenMS
     // we keep the user's stylesheet instead of overriding it with the OpenMS default.
     if (this->styleSheet().isEmpty())
     {
-      std::string filename = File::find("GUISTYLE/qtStyleSheet.qss");
-      QFile fh(toQString(filename));
+      // compiled into the library (source/VISUAL/STYLE/style.qrc): the OpenMS core's
+      // share/OpenMS, which File::find() searches, does not hold the GUI's data
+      QFile fh(":/GUISTYLE/qtStyleSheet.qss");
       fh.open(QFile::ReadOnly);
       QString style_string = QLatin1String(fh.readAll());
       //std::cerr << "Stylesheet content: " << style_string.toStdString() << "\n\n\n";
