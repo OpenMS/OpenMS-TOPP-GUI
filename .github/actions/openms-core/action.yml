@@ -153,10 +153,12 @@ runs:
         echo "OpenMS $REF is at $sha"
         {
           echo "sha=$sha"
-          # bump the version (v1) to drop all cached cores, e.g. after a change of
-          # the configuration below. The ref ends with ':', which no git ref name
-          # contains, so the prefix of 'develop' does not match 'develop-foo'.
-          echo "key_prefix=openms-core-v1-$RUNNER_OS-$RUNNER_ARCH-$REF:"
+          # bump the version to drop all cached cores, e.g. after a change of the
+          # configuration below or when the GUI layer needs a newer core (v2: cores
+          # from before OpenMS/OpenMS#10844 lack the PATH lookup of TOPP tools). The
+          # ref ends with ':', which no git ref name contains, so the prefix of
+          # 'develop' does not match 'develop-foo'.
+          echo "key_prefix=openms-core-v2-$RUNNER_OS-$RUNNER_ARCH-$REF:"
         } >>"$GITHUB_OUTPUT"
 
     - name: Restore a Cached Build of the Core
