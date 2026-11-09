@@ -99,6 +99,8 @@ source_group("Source Files\\VISUAL" FILES ${sources})
 ### icons
 # add   : icons are added to source/VISUAL/ICONS/resources.qrc
 # remove: after removing an icon, you have to rerun 'cmake' to fix the dependencies
-qt_add_resources(qt_resource_file source/VISUAL/ICONS/resources.qrc)
+## the default style sheet of the GUI applications (QApplicationTOPP), compiled into the
+## library so that it does not depend on where the GUI layer is installed or run from
+qt_add_resources(qt_resource_file source/VISUAL/ICONS/resources.qrc source/VISUAL/STYLE/style.qrc)
 set(OpenMSVisual_sources ${OpenMSVisual_sources} ${qt_resource_file})
 set_property(SOURCE ${qt_resource_file} PROPERTY SKIP_AUTOGEN ON)

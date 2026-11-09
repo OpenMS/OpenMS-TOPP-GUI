@@ -61,13 +61,19 @@ if(HAS_XSERVER)
     openms_add_executable_compiler_flags(${_gui_test})
   endforeach()
 
+  ## a class test that needs a display: QApplicationTOPP is a QApplication
+  add_executable(QApplicationTOPP_test source/QApplicationTOPP_test.cpp)
+  target_link_libraries(QApplicationTOPP_test PRIVATE OpenMSTestSupport OpenMS_GUI)
+  openms_add_executable_compiler_flags(QApplicationTOPP_test)
+  list(APPEND GUI_executables_list QApplicationTOPP_test)
+
   add_custom_target(GUI_TEST)
   add_dependencies(GUI_TEST ${GUI_executables_list})
 
   ## TOPPView_test opens examples/peakpicker_tutorial_1.mzML from the shared data of
   ## the OpenMS core (install component 'examples', not part of the OpenMS SDK)
   set(_toppview_example "${OPENMS_DATA_DIR}/examples/peakpicker_tutorial_1.mzML")
-  set(_gui_tests TSGDialog_test)
+  set(_gui_tests TSGDialog_test QApplicationTOPP_test)
   if(EXISTS "${_toppview_example}")
     list(APPEND _gui_tests TOPPView_test)
   else()

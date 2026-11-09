@@ -54,7 +54,7 @@ OpenMS-TOPP-GUI/
 ├── src/
 │   ├── openms_gui/                 # OpenMS_GUI library and the GUI tools
 │   │   ├── include/OpenMS/VISUAL/  # Headers (.h)
-│   │   ├── source/VISUAL/          # Implementation (.cpp), .ui files, ICONS/ (resources.qrc)
+│   │   ├── source/VISUAL/          # Implementation (.cpp), .ui files, ICONS/ (resources.qrc), STYLE/ (style sheet, style.qrc)
 │   │   │   └── APPLICATIONS/GUITOOLS/  # main() of TOPPView, TOPPAS, INIFileEditor, ExecutePipeline,
 │   │   │                               # ImageCreator (+ their doxygen tool pages, icons, mac bundle data)
 │   │   └── includes.cmake          # source and header lists
@@ -64,7 +64,7 @@ OpenMS-TOPP-GUI/
 │       ├── topp/                   # tests of ExecutePipeline / ImageCreator
 │       ├── toppas/                 # TOPPAS pipeline tests (ExecutePipeline)
 │       └── external/               # installed-consumer test
-├── share/OpenMS/                   # GUISTYLE (Qt style sheet), DESKTOP (Linux desktop files)
+├── share/OpenMS/                   # DESKTOP (Linux desktop files)
 ├── doc/                            # doxygen (GUI tool pages, TOPPAS tutorial), documenters, code examples
 ├── cmake/                          # build, install and packaging (trimmed copies of OpenMS cmake/)
 └── tools/                          # CI scripts, update_version_numbers.sh

@@ -31,10 +31,9 @@ install(FILES "${OPENMS_TOOL_REGISTRY_BUILD_FILE}"
 )
 
 #------------------------------------------------------------------------------
-# Shared data of the GUI layer, installed into the share/OpenMS of the OpenMS core:
-# the style sheet of the GUI applications (read through File::find("GUISTYLE/...")).
+# Desktop integration (Linux). The GUI layer installs no other shared data: the style
+# sheet of the applications is compiled into libOpenMS_GUI (source/VISUAL/STYLE).
 #------------------------------------------------------------------------------
-install_directory(${OPENMS_HOST_DIRECTORY}/share/OpenMS/GUISTYLE ${INSTALL_SHARE_DIR} ${OPENMS_GUI_APPLICATIONS_COMPONENT})
 include(${OPENMS_HOST_DIRECTORY}/cmake/install_desktop.cmake)
 
 #------------------------------------------------------------------------------

@@ -32,7 +32,10 @@ endif()
 ## WITH_GUI=ON registers them in its OpenMS.tsv even when the GUI library is not installed).
 ## ToolHandler refuses to start any tool when a name is registered twice, so with the
 ## registry of this layer next to it every OpenMS tool would fail.
+## The registry of this layer itself (OpenMS-GUI.tsv, there when the GUI layer is already
+## installed into the core's prefix) lists them as well and is not checked.
 file(GLOB _openms_core_registries "${OPENMS_DATA_DIR}/TOOLS/*.tsv")
+list(FILTER _openms_core_registries EXCLUDE REGEX "/OpenMS-GUI\\.tsv$")
 foreach(_registry IN LISTS _openms_core_registries)
   file(STRINGS "${_registry}" _gui_tools_in_core REGEX "^(ExecutePipeline|ImageCreator)\t")
   if(_gui_tools_in_core)

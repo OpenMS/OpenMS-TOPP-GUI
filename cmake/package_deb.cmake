@@ -34,7 +34,7 @@ endif()
 ## (the distribution's Qt) to this.
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "openms (= ${CPACK_DEBIAN_PACKAGE_VERSION})")
 ## Until 3.7.0 the package openms contained the GUI (/usr/bin/TOPPView, libOpenMS_GUI.so,
-## share/OpenMS/GUISTYLE, ...); these files now belong to openms-gui.
+## share/OpenMS/GUISTYLE, ...); the GUI files now belong to openms-gui.
 set(CPACK_DEBIAN_PACKAGE_REPLACES "openms (<< 3.7.0~)")
 set(CPACK_DEBIAN_PACKAGE_BREAKS "openms (<< 3.7.0~)")
 
