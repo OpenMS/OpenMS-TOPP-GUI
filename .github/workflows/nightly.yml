@@ -21,10 +21,8 @@ name: "Nightly"
 #    string without a branch name.
 #  - workflow_dispatch.
 #
-# The nightly installers (release.yml) are only built when the repository variable
-# GUI_NIGHTLY_INSTALLERS is 'true': they are installed on top of the OpenMS nightly
-# installers of the same day, which must not contain the GUI themselves (until
-# OpenMS has dropped it, an installation would have two copies of every GUI tool).
+# Automatic runs build and deploy the nightly installers (release.yml) on top of
+# the OpenMS nightly installers of the same day. Manual runs can opt in below.
 on:
   schedule:
     - cron: "23 4 * * *"
@@ -60,7 +58,7 @@ jobs:
 
   installers:
     name: "Nightly Installers"
-    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.installers) || (github.event_name != 'workflow_dispatch' && vars.GUI_NIGHTLY_INSTALLERS == 'true') }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.installers }}
     uses: ./.github/workflows/release.yml
     permissions:
       contents: write
